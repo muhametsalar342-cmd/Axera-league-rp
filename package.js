@@ -1,7 +1,6 @@
 {
-  "name": "axera-league-rp",
+  "name": "axera-league-bot",
   "version": "1.0.0",
-  "description": "Axera League Discord RP Bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"

@@ -1,5 +1,5 @@
 {
-  "name": "axera-league-bot",
+  "name": "axera-league-rp",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {

@@ -1,30 +1,24 @@
 // ============================================================
-// AXERA LEAGUE DISCORD BOT
+// AXERA LEAGUE BOT
 // Discord.js v14
 // ============================================================
 //
 // KOMUTLAR
 //
 // .yardım
+// .yardim
+//
 // .k @oyuncu TakmaAdı
+//
 // .ant
 // .antrenman
+//
 // .pen
 // .penaltı
+// .penalti
+//
 // .dver @oyuncu 5
 // .dsil @oyuncu 5
-//
-// SİSTEMLER
-// - Kayıt sistemi
-// - Futbolcu / Kaleci / Teknik Direktör butonları
-// - Yeni üye karşılama
-// - Antrenman 5/5 = +5M€
-// - Penaltı NPC kaleci
-// - %20 gol / %40 direk / %40 kurtarış
-// - Gol = +5M€
-// - Değer verme
-// - Değer silme
-// - Yardım komutu
 //
 // ============================================================
 
@@ -45,11 +39,17 @@ const path = require("path");
 // ============================================================
 // TOKEN
 // ============================================================
+//
+// Railway kullanıyorsan Variables kısmına:
+// TOKEN = BOT_TOKENIN
+//
+// ============================================================
 
-const TOKEN = process.env.TOKEN || "BURAYA_BOT_TOKENINI_YAZ";
+const TOKEN =
+    process.env.TOKEN || "BURAYA_BOT_TOKENINI_YAZ";
 
 // ============================================================
-// ROLLER
+// ROL ID'LERİ
 // ============================================================
 
 const ROLES = {
@@ -62,7 +62,7 @@ const ROLES = {
 };
 
 // ============================================================
-// KANALLAR
+// KANAL ID'LERİ
 // ============================================================
 
 const CHANNELS = {
@@ -78,6 +78,7 @@ const CHANNELS = {
 
 const TRAINING_MAX = 5;
 const TRAINING_REWARD = 5;
+
 const PENALTY_REWARD = 5;
 
 // ============================================================
@@ -104,12 +105,17 @@ const client = new Client({
 // VERİ DOSYASI
 // ============================================================
 
-const DATA_FILE = path.join(__dirname, "data.json");
+const DATA_FILE =
+    path.join(__dirname, "data.json");
 
 let data = {
     training: {},
     registrations: {}
 };
+
+// ============================================================
+// VERİYİ KAYDET
+// ============================================================
 
 function saveData() {
     try {
@@ -119,36 +125,53 @@ function saveData() {
             "utf8"
         );
     } catch (error) {
-        console.error("Veri kaydedilemedi:", error);
+        console.error(
+            "Veri kaydetme hatası:",
+            error
+        );
     }
 }
 
+// ============================================================
+// VERİYİ YÜKLE
+// ============================================================
+
 function loadData() {
     try {
+
         if (!fs.existsSync(DATA_FILE)) {
             saveData();
             return;
         }
 
-        const file = fs.readFileSync(
-            DATA_FILE,
-            "utf8"
-        );
+        const file =
+            fs.readFileSync(
+                DATA_FILE,
+                "utf8"
+            );
 
         if (!file.trim()) {
             saveData();
             return;
         }
 
-        const parsed = JSON.parse(file);
+        const parsed =
+            JSON.parse(file);
 
         data = {
-            training: parsed.training || {},
-            registrations: parsed.registrations || {}
+            training:
+                parsed.training || {},
+
+            registrations:
+                parsed.registrations || {}
         };
 
     } catch (error) {
-        console.error("data.json okunamadı:", error);
+
+        console.error(
+            "data.json okuma hatası:",
+            error
+        );
 
         data = {
             training: {},
@@ -162,11 +185,14 @@ function loadData() {
 loadData();
 
 // ============================================================
-// YARDIMCI FONKSİYONLAR
+// YETKİ KONTROLLERİ
 // ============================================================
 
 function isAdmin(member) {
-    if (!member) return false;
+
+    if (!member) {
+        return false;
+    }
 
     return member.permissions.has(
         PermissionsBitField.Flags.Administrator
@@ -174,7 +200,10 @@ function isAdmin(member) {
 }
 
 function isRegistrationStaff(member) {
-    if (!member) return false;
+
+    if (!member) {
+        return false;
+    }
 
     return (
         isAdmin(member) ||
@@ -185,7 +214,10 @@ function isRegistrationStaff(member) {
 }
 
 function isValueStaff(member) {
-    if (!member) return false;
+
+    if (!member) {
+        return false;
+    }
 
     return (
         isAdmin(member) ||
@@ -196,15 +228,18 @@ function isValueStaff(member) {
 }
 
 // ============================================================
-// PARA
+// PARA FORMAT
 // ============================================================
 
 function formatMoney(value) {
-    if (!Number.isFinite(value)) {
+
+    if (
+        typeof value !== "number" ||
+        !Number.isFinite(value)
+    ) {
         value = 0;
     }
 
-    // Tam sayı olarak gösteriyoruz.
     if (Number.isInteger(value)) {
         return `${value}M€`;
     }
@@ -213,25 +248,32 @@ function formatMoney(value) {
 }
 
 // ============================================================
-// NICK'TEN DEĞER OKUMA
+// NICKTEN PARA OKU
 // ============================================================
 
 function getPlayerValue(nickname) {
-    if (!nickname) return 0;
 
-    const match = nickname.match(
-        /(\d+(?:[.,]\d+)?)M€\s*$/i
-    );
+    if (!nickname) {
+        return 0;
+    }
+
+    const match =
+        nickname.match(
+            /(\d+(?:[.,]\d+)?)M€\s*$/i
+        );
 
     if (!match) {
         return 0;
     }
 
-    const value = Number(
-        match[1].replace(",", ".")
-    );
+    const value =
+        Number(
+            match[1].replace(",", ".")
+        );
 
-    if (!Number.isFinite(value)) {
+    if (
+        !Number.isFinite(value)
+    ) {
         return 0;
     }
 
@@ -239,21 +281,24 @@ function getPlayerValue(nickname) {
 }
 
 // ============================================================
-// SADECE SON DEĞERİ DEĞİŞTİR
+// NICKTE SADECE DEĞERİ DEĞİŞTİR
 // ============================================================
 
 function updateNicknameValue(
     nickname,
     newValue
 ) {
-    const money = formatMoney(newValue);
 
-    const valueRegex =
+    const money =
+        formatMoney(newValue);
+
+    const regex =
         /(\d+(?:[.,]\d+)?)M€\s*$/i;
 
-    if (valueRegex.test(nickname)) {
+    if (regex.test(nickname)) {
+
         return nickname.replace(
-            valueRegex,
+            regex,
             money
         );
     }
@@ -262,17 +307,20 @@ function updateNicknameValue(
 }
 
 // ============================================================
-// DEĞER DEĞİŞTİRME
+// OYUNCU DEĞERİNİ DEĞİŞTİR
 // ============================================================
 
 async function changePlayerValue(
     member,
     amount
 ) {
+
     if (!member) {
+
         return {
             success: false,
-            reason: "Oyuncu bulunamadı."
+            reason:
+                "Oyuncu bulunamadı."
         };
     }
 
@@ -282,7 +330,9 @@ async function changePlayerValue(
         member.user.username;
 
     const oldValue =
-        getPlayerValue(oldNickname);
+        getPlayerValue(
+            oldNickname
+        );
 
     let newValue =
         oldValue + amount;
@@ -298,7 +348,12 @@ async function changePlayerValue(
         );
 
     try {
-        if (newNickname !== oldNickname) {
+
+        if (
+            oldNickname !==
+            newNickname
+        ) {
+
             await member.setNickname(
                 newNickname,
                 "Axera League değer sistemi"
@@ -314,27 +369,31 @@ async function changePlayerValue(
         };
 
     } catch (error) {
+
         console.error(
-            "Nick değiştirilemedi:",
+            "Nick değişiklik hatası:",
             error
         );
 
         return {
             success: false,
             reason:
-                "Oyuncunun nicki değiştirilemedi. Bot rolünün yeterince yukarıda olduğundan emin ol."
+                "Nick değiştirilemedi. Bot rolünün oyuncunun üzerinde olduğundan emin ol."
         };
     }
 }
 
 // ============================================================
-// ANTRENMAN VERİSİ
+// ANTRENMAN
 // ============================================================
 
 function getTraining(userId) {
+
     if (
-        typeof data.training[userId] !== "number"
+        typeof data.training[userId] !==
+        "number"
     ) {
+
         data.training[userId] = 0;
     }
 
@@ -345,16 +404,22 @@ function setTraining(
     userId,
     value
 ) {
-    data.training[userId] = value;
+
+    data.training[userId] =
+        value;
+
     saveData();
 }
 
 // ============================================================
-// KAYITLI MI?
+// KAYIT KONTROLÜ
 // ============================================================
 
 function isRegistered(member) {
-    if (!member) return false;
+
+    if (!member) {
+        return false;
+    }
 
     return (
         member.roles.cache.has(
@@ -376,6 +441,7 @@ function isRegistered(member) {
 client.once(
     "ready",
     () => {
+
         console.log(
             "======================================"
         );
@@ -393,29 +459,35 @@ client.once(
         );
 
         console.log(
-            `Sunucu: ${client.guilds.cache.size}`
+            `Sunucu sayısı: ${client.guilds.cache.size}`
         );
 
         client.user.setPresence({
+
             activities: [
                 {
-                    name: "Axera League ⚽",
+                    name:
+                        "Axera League ⚽",
                     type: 3
                 }
             ],
-            status: "online"
+
+            status:
+                "online"
         });
     }
 );
 
 // ============================================================
-// YENİ ÜYE GELDİ
+// YENİ ÜYE
 // ============================================================
 
 client.on(
     "guildMemberAdd",
-    async (member) => {
+    async member => {
+
         try {
+
             const channel =
                 member.guild.channels.cache.get(
                     CHANNELS.KAYIT
@@ -430,42 +502,59 @@ client.on(
 
             const embed =
                 new EmbedBuilder()
+
                     .setTitle(
                         "👋 Axera League'e Hoş Geldin!"
                     )
+
                     .setDescription(
                         `🎉 ${member} sunucumuza katıldı!\n\n` +
                         `📝 Kayıt işlemin için lütfen bekle.\n` +
                         `🔔 Kayıt yetkilimiz seninle ilgilenecektir.\n\n` +
                         `<@&${ROLES.KAYIT_YETKILISI}>`
                     )
+
                     .setThumbnail(
                         member.user.displayAvatarURL({
-                            extension: "png",
-                            size: 256
+                            extension:
+                                "png",
+                            size:
+                                256
                         })
                     )
+
                     .setFooter({
                         text:
                             "Axera League • Kayıt Sistemi"
                     })
+
                     .setTimestamp();
 
             await channel.send({
+
                 content:
                     `<@&${ROLES.KAYIT_YETKILISI}>`,
-                embeds: [embed],
+
+                embeds: [
+                    embed
+                ],
+
                 allowedMentions: {
+
                     roles: [
                         ROLES.KAYIT_YETKILISI
                     ],
-                    users: [member.id]
+
+                    users: [
+                        member.id
+                    ]
                 }
             });
 
         } catch (error) {
+
             console.error(
-                "Yeni üye sisteminde hata:",
+                "Yeni üye mesaj hatası:",
                 error
             );
         }
@@ -473,17 +562,22 @@ client.on(
 );
 
 // ============================================================
-// MESAJLAR
+// MESAJ KOMUTLARI
 // ============================================================
 
 client.on(
     "messageCreate",
-    async (message) => {
+    async message => {
 
         try {
 
-            if (message.author.bot) return;
-            if (!message.guild) return;
+            if (message.author.bot) {
+                return;
+            }
+
+            if (!message.guild) {
+                return;
+            }
 
             const content =
                 message.content.trim();
@@ -499,20 +593,23 @@ client.on(
 
                 const embed =
                     new EmbedBuilder()
+
                         .setTitle(
-                            "📚 Axera League • Yardım"
+                            "📚 AXERA LEAGUE • YARDIM"
                         )
+
                         .setDescription(
-                            "Axera League bot komutları aşağıdadır."
+                            "Kullanabileceğin komutlar:"
                         )
 
                         .addFields(
+
                             {
                                 name:
                                     "📝 Kayıt",
                                 value:
                                     "`.k @oyuncu TakmaAdı`\n" +
-                                    "Futbolcu, Kaleci veya Teknik Direktör seçimi yapılır."
+                                    "Futbolcu / Kaleci / Teknik Direktör butonları çıkar."
                             },
 
                             {
@@ -520,29 +617,29 @@ client.on(
                                     "🏋️ Antrenman",
                                 value:
                                     "`.ant` veya `.antrenman`\n" +
-                                    "Sadece Antrenman kanalında çalışır.\n" +
-                                    "5/5 tamamlanınca **+5M€**."
+                                    "Sadece Antrenman kanalında.\n" +
+                                    "5/5 = **+5M€**"
                             },
 
                             {
                                 name:
                                     "⚽ Penaltı",
                                 value:
-                                    "`.pen` veya `.penaltı`\n" +
-                                    "Sadece Penaltı kanalında çalışır.\n" +
-                                    "🟢 %20 Gol\n" +
-                                    "🥅 %40 Direk\n" +
-                                    "🧤 %40 NPC Kaleci kurtarışı\n" +
-                                    "Gol = **+5M€**."
+                                    "`.pen` / `.penaltı`\n" +
+                                    "Sadece Penaltı kanalında.\n" +
+                                    "⚽ Gol: %33,33\n" +
+                                    "🥅 Direk: %33,33\n" +
+                                    "🧤 NPC kurtarış: %33,34\n" +
+                                    "Gol = **+5M€**"
                             },
 
                             {
                                 name:
-                                    "💰 Değer Ver",
+                                    "💰 Değer",
                                 value:
                                     "`.dver @oyuncu 5`\n" +
-                                    "Oyuncuya +5M€ verir.\n" +
-                                    "Sadece Değer Yetkilisi."
+                                    "Sadece Değer Yetkilisi.\n" +
+                                    "**+5M€** verir."
                             },
 
                             {
@@ -550,22 +647,23 @@ client.on(
                                     "💸 Değer Sil",
                                 value:
                                     "`.dsil @oyuncu 5`\n" +
-                                    "Oyuncudan 5M€ siler.\n" +
-                                    "Sadece Değer Yetkilisi."
+                                    "Sadece Değer Yetkilisi.\n" +
+                                    "**-5M€** siler."
                             }
-                        )
 
-                        .setColor(0x2b2d31)
+                        )
 
                         .setFooter({
                             text:
-                                "Axera League • Yardım Menüsü"
+                                "Axera League"
                         })
 
                         .setTimestamp();
 
                 return message.reply({
-                    embeds: [embed]
+                    embeds: [
+                        embed
+                    ]
                 });
             }
 
@@ -582,6 +680,7 @@ client.on(
                     message.channel.id !==
                     CHANNELS.ANTRENMAN
                 ) {
+
                     return message.reply({
                         content:
                             `❌ Bu komut sadece <#${CHANNELS.ANTRENMAN}> kanalında kullanılabilir.`
@@ -593,6 +692,7 @@ client.on(
                         message.member
                     )
                 ) {
+
                     return message.reply({
                         content:
                             "❌ Önce kayıt olmalısın."
@@ -606,7 +706,10 @@ client.on(
 
                 progress++;
 
-                // 5/5 tamamlanmadıysa
+                // -----------------------------
+                // 5/5 DEĞİL
+                // -----------------------------
+
                 if (
                     progress <
                     TRAINING_MAX
@@ -619,26 +722,34 @@ client.on(
 
                     const embed =
                         new EmbedBuilder()
+
                             .setTitle(
                                 "🏋️ Antrenman"
                             )
+
                             .setDescription(
                                 `${message.member} antrenman yaptı!\n\n` +
-                                `📊 İlerleme: **${progress}/${TRAINING_MAX}**\n` +
-                                `🎯 Kalan: **${TRAINING_MAX - progress}**`
+                                `📊 İlerleme: **${progress}/5**\n` +
+                                `🎯 Kalan: **${5 - progress}**`
                             )
+
                             .setFooter({
                                 text:
                                     "Axera League • Antrenman"
                             })
+
                             .setTimestamp();
 
                     return message.reply({
-                        embeds: [embed]
+                        embeds: [
+                            embed
+                        ]
                     });
                 }
 
+                // -----------------------------
                 // 5/5 TAMAMLANDI
+                // -----------------------------
 
                 const result =
                     await changePlayerValue(
@@ -667,9 +778,11 @@ client.on(
 
                 const embed =
                     new EmbedBuilder()
+
                         .setTitle(
-                            "🎉 Antrenman Tamamlandı!"
+                            "🎉 ANTRENMAN TAMAMLANDI!"
                         )
+
                         .setDescription(
                             `${message.member} antrenmanı tamamladı!\n\n` +
                             `🏋️ İlerleme: **5/5**\n` +
@@ -677,14 +790,18 @@ client.on(
                             `💎 Yeni değer: **${formatMoney(result.newValue)}**\n\n` +
                             `🔄 Yeni seri: **0/5**`
                         )
+
                         .setFooter({
                             text:
                                 "Axera League • Antrenman Sistemi"
                         })
+
                         .setTimestamp();
 
                 return message.reply({
-                    embeds: [embed]
+                    embeds: [
+                        embed
+                    ]
                 });
             }
 
@@ -702,6 +819,7 @@ client.on(
                     message.channel.id !==
                     CHANNELS.PENALTI
                 ) {
+
                     return message.reply({
                         content:
                             `❌ Bu komut sadece <#${CHANNELS.PENALTI}> kanalında kullanılabilir.`
@@ -713,20 +831,20 @@ client.on(
                         message.member
                     )
                 ) {
+
                     return message.reply({
                         content:
                             "❌ Önce kayıt olmalısın."
                     });
                 }
 
-                const shootingMessage =
+                const shotMessage =
                     await message.reply({
                         content:
                             `🧤 **Axera Kalecisi (NPC)** kalede!\n` +
                             `⚽ ${message.member} penaltıyı kullanıyor...`
                     });
 
-                // Küçük bekleme
                 await new Promise(
                     resolve =>
                         setTimeout(
@@ -735,43 +853,64 @@ client.on(
                         )
                 );
 
-                const random =
-                    Math.random() * 100;
+                // =================================================
+                // 3 SONUÇ EŞİT ŞANSLI
+                // 0 = GOL
+                // 1 = DİREK
+                // 2 = KALECİ
+                // =================================================
 
-                // %20 GOL
-                if (random < 20) {
+                const result =
+                    Math.floor(
+                        Math.random() * 3
+                    );
 
-                    const result =
+                // -----------------------------
+                // GOL
+                // -----------------------------
+
+                if (
+                    result === 0
+                ) {
+
+                    const valueResult =
                         await changePlayerValue(
                             message.member,
                             PENALTY_REWARD
                         );
 
-                    if (!result.success) {
+                    if (
+                        !valueResult.success
+                    ) {
 
-                        return shootingMessage.edit({
+                        return shotMessage.edit({
                             content:
                                 `🧤 **Axera Kalecisi (NPC)** kalede!\n` +
                                 `⚽ ${message.member} şutunu çekti...\n\n` +
                                 `⚽ **GOOOL!**\n` +
-                                `💰 Ödül hesaplanırken hata oluştu: ${result.reason}`
+                                `❌ Değer eklenemedi: ${valueResult.reason}`
                         });
                     }
 
-                    return shootingMessage.edit({
+                    return shotMessage.edit({
                         content:
                             `🧤 **Axera Kalecisi (NPC)** kalede!\n` +
                             `⚽ ${message.member} şutunu çekti...\n\n` +
-                            `🎯 **GOOOOL!** ⚽\n\n` +
+                            `🎯 **GOOOOOL!** ⚽\n\n` +
                             `💰 Ödül: **+5M€**\n` +
-                            `💎 Yeni değer: **${formatMoney(result.newValue)}**`
+                            `💎 Yeni değer: **${formatMoney(valueResult.newValue)}**`
                     });
                 }
 
-                // %40 DİREK
-                if (random < 60) {
+                // -----------------------------
+                // DİREK
+                // -----------------------------
 
-                    return shootingMessage.edit({
+                if (
+                    result === 1
+                ) {
+
+                    return shotMessage.edit({
                         content:
                             `🧤 **Axera Kalecisi (NPC)** kalede!\n` +
                             `⚽ ${message.member} şutunu çekti...\n\n` +
@@ -781,8 +920,11 @@ client.on(
                     });
                 }
 
-                // %40 KALECİ KURTARDI
-                return shootingMessage.edit({
+                // -----------------------------
+                // KALECİ KURTARDI
+                // -----------------------------
+
+                return shotMessage.edit({
                     content:
                         `🧤 **Axera Kalecisi (NPC)** kalede!\n` +
                         `⚽ ${message.member} şutunu çekti...\n\n` +
@@ -805,6 +947,7 @@ client.on(
                         message.member
                     )
                 ) {
+
                     return message.reply({
                         content:
                             "❌ Bu komutu sadece **Değer Yetkilisi** kullanabilir."
@@ -815,26 +958,32 @@ client.on(
                     message.mentions.members.first();
 
                 if (!target) {
+
                     return message.reply({
                         content:
-                            "❌ Oyuncuyu etiketlemelisin.\n" +
+                            "❌ Oyuncuyu etiketlemelisin.\n\n" +
                             "Örnek: `.dver @oyuncu 5`"
                     });
                 }
 
                 const args =
-                    content.split(/\s+/);
+                    content.split(
+                        /\s+/
+                    );
 
                 const amount =
                     Number(args[2]);
 
                 if (
-                    !Number.isInteger(amount) ||
+                    !Number.isInteger(
+                        amount
+                    ) ||
                     amount <= 0
                 ) {
+
                     return message.reply({
                         content:
-                            "❌ Sadece pozitif tam sayı yazmalısın.\n" +
+                            "❌ Sadece pozitif tam sayı yazmalısın.\n\n" +
                             "Örnek: `.dver @oyuncu 5`"
                     });
                 }
@@ -845,7 +994,10 @@ client.on(
                         amount
                     );
 
-                if (!result.success) {
+                if (
+                    !result.success
+                ) {
+
                     return message.reply({
                         content:
                             `❌ ${result.reason}`
@@ -854,9 +1006,11 @@ client.on(
 
                 const embed =
                     new EmbedBuilder()
+
                         .setTitle(
-                            "💰 Değer Verildi"
+                            "💰 DEĞER VERİLDİ"
                         )
+
                         .setDescription(
                             `👤 Oyuncu: ${target}\n` +
                             `📈 Eklenen: **+${amount}M€**\n` +
@@ -864,14 +1018,18 @@ client.on(
                             `💎 Yeni değer: **${formatMoney(result.newValue)}**\n\n` +
                             `🛠️ Yetkili: ${message.author}`
                         )
+
                         .setFooter({
                             text:
                                 "Axera League • Değer Sistemi"
                         })
+
                         .setTimestamp();
 
                 return message.reply({
-                    embeds: [embed]
+                    embeds: [
+                        embed
+                    ]
                 });
             }
 
@@ -888,6 +1046,7 @@ client.on(
                         message.member
                     )
                 ) {
+
                     return message.reply({
                         content:
                             "❌ Bu komutu sadece **Değer Yetkilisi** kullanabilir."
@@ -898,26 +1057,32 @@ client.on(
                     message.mentions.members.first();
 
                 if (!target) {
+
                     return message.reply({
                         content:
-                            "❌ Oyuncuyu etiketlemelisin.\n" +
+                            "❌ Oyuncuyu etiketlemelisin.\n\n" +
                             "Örnek: `.dsil @oyuncu 5`"
                     });
                 }
 
                 const args =
-                    content.split(/\s+/);
+                    content.split(
+                        /\s+/
+                    );
 
                 const amount =
                     Number(args[2]);
 
                 if (
-                    !Number.isInteger(amount) ||
+                    !Number.isInteger(
+                        amount
+                    ) ||
                     amount <= 0
                 ) {
+
                     return message.reply({
                         content:
-                            "❌ Sadece pozitif tam sayı yazmalısın.\n" +
+                            "❌ Sadece pozitif tam sayı yazmalısın.\n\n" +
                             "Örnek: `.dsil @oyuncu 5`"
                     });
                 }
@@ -928,7 +1093,10 @@ client.on(
                         -amount
                     );
 
-                if (!result.success) {
+                if (
+                    !result.success
+                ) {
+
                     return message.reply({
                         content:
                             `❌ ${result.reason}`
@@ -937,9 +1105,11 @@ client.on(
 
                 const embed =
                     new EmbedBuilder()
+
                         .setTitle(
-                            "💸 Değer Silindi"
+                            "💸 DEĞER SİLİNDİ"
                         )
+
                         .setDescription(
                             `👤 Oyuncu: ${target}\n` +
                             `📉 Silinen: **-${amount}M€**\n` +
@@ -947,14 +1117,18 @@ client.on(
                             `💎 Yeni değer: **${formatMoney(result.newValue)}**\n\n` +
                             `🛠️ Yetkili: ${message.author}`
                         )
+
                         .setFooter({
                             text:
                                 "Axera League • Değer Sistemi"
                         })
+
                         .setTimestamp();
 
                 return message.reply({
-                    embeds: [embed]
+                    embeds: [
+                        embed
+                    ]
                 });
             }
 
@@ -970,6 +1144,7 @@ client.on(
                     message.channel.id !==
                     CHANNELS.KAYIT
                 ) {
+
                     return message.reply({
                         content:
                             `❌ Bu komut sadece <#${CHANNELS.KAYIT}> kanalında kullanılabilir.`
@@ -981,6 +1156,7 @@ client.on(
                         message.member
                     )
                 ) {
+
                     return message.reply({
                         content:
                             "❌ Bu komutu sadece **Kayıt Yetkilisi** kullanabilir."
@@ -991,6 +1167,7 @@ client.on(
                     message.mentions.members.first();
 
                 if (!target) {
+
                     return message.reply({
                         content:
                             "❌ Oyuncuyu etiketlemelisin.\n\n" +
@@ -1016,6 +1193,7 @@ client.on(
                         .trim();
 
                 if (!nickname) {
+
                     return message.reply({
                         content:
                             "❌ Oyuncunun takma adını yazmalısın."
@@ -1039,16 +1217,18 @@ client.on(
                         .trim();
 
                 if (!nickname) {
+
                     return message.reply({
                         content:
                             "❌ Geçerli bir takma ad yaz."
                     });
                 }
 
-                // Discord maksimum nick uzunluğu
                 if (
-                    nickname.length > 26
+                    nickname.length >
+                    26
                 ) {
+
                     nickname =
                         nickname.substring(
                             0,
@@ -1062,6 +1242,7 @@ client.on(
                 data.registrations[
                     registrationId
                 ] = {
+
                     targetId:
                         target.id,
 
@@ -1079,41 +1260,53 @@ client.on(
 
                 const embed =
                     new EmbedBuilder()
+
                         .setTitle(
-                            "📝 Axera League Kayıt"
+                            "📝 AXERA LEAGUE KAYIT"
                         )
+
                         .setDescription(
                             `👤 Oyuncu: ${target}\n` +
                             `🏷️ Takma Adı: **${nickname}**\n\n` +
                             `Oyuncunun görevini aşağıdaki butonlardan seç.`
                         )
+
                         .addFields(
+
                             {
                                 name:
                                     "⚽ Futbolcu",
                                 value:
                                     "Futbolcu rolü verilir.",
-                                inline: true
+                                inline:
+                                    true
                             },
+
                             {
                                 name:
                                     "🧤 Kaleci",
                                 value:
                                     "Kaleci rolü verilir.",
-                                inline: true
+                                inline:
+                                    true
                             },
+
                             {
                                 name:
                                     "📋 Teknik Direktör",
                                 value:
                                     "Teknik Direktör rolü verilir.",
-                                inline: true
+                                inline:
+                                    true
                             }
+
                         )
+
                         .setFooter({
                             text:
                                 "Axera League • Kayıt Sistemi"
                         })
+
                         .setTimestamp();
 
                 const row =
@@ -1164,15 +1357,21 @@ client.on(
                         );
 
                 return message.channel.send({
-                    embeds: [embed],
-                    components: [row]
+
+                    embeds: [
+                        embed
+                    ],
+
+                    components: [
+                        row
+                    ]
                 });
             }
 
         } catch (error) {
 
             console.error(
-                "messageCreate hatası:",
+                "Komut hatası:",
                 error
             );
 
@@ -1182,6 +1381,7 @@ client.on(
                     !message.replied &&
                     !message.deferred
                 ) {
+
                     await message.reply({
                         content:
                             "❌ İşlem sırasında bir hata oluştu."
@@ -1199,11 +1399,13 @@ client.on(
 
 client.on(
     "interactionCreate",
-    async (interaction) => {
+    async interaction => {
 
         try {
 
-            if (!interaction.isButton()) {
+            if (
+                !interaction.isButton()
+            ) {
                 return;
             }
 
@@ -1223,10 +1425,12 @@ client.on(
             if (
                 parts.length < 3
             ) {
+
                 return interaction.reply({
                     content:
                         "❌ Geçersiz kayıt işlemi.",
-                    ephemeral: true
+                    ephemeral:
+                        true
                 });
             }
 
@@ -1244,36 +1448,31 @@ client.on(
                 ];
 
             if (!registration) {
+
                 return interaction.reply({
                     content:
                         "❌ Bu kayıt işlemi artık geçerli değil.",
-                    ephemeral: true
+                    ephemeral:
+                        true
                 });
             }
 
-            // Sadece kayıt yetkilileri buton kullanabilir.
             if (
                 !isRegistrationStaff(
                     interaction.member
                 )
             ) {
+
                 return interaction.reply({
                     content:
                         "❌ Bu butonu sadece Kayıt Yetkilisi kullanabilir.",
-                    ephemeral: true
+                    ephemeral:
+                        true
                 });
             }
 
             const guild =
                 interaction.guild;
-
-            if (!guild) {
-                return interaction.reply({
-                    content:
-                        "❌ Sunucu bulunamadı.",
-                    ephemeral: true
-                });
-            }
 
             const target =
                 await guild.members
@@ -1295,66 +1494,78 @@ client.on(
                 return interaction.reply({
                     content:
                         "❌ Oyuncu sunucuda bulunamadı.",
-                    ephemeral: true
+                    ephemeral:
+                        true
                 });
             }
 
             let roleId;
             let roleName;
 
+            // =================================================
+            // ROL SEÇİMİ
+            // =================================================
+
             if (
-                type === "futbolcu"
+                type ===
+                "futbolcu"
             ) {
+
                 roleId =
                     ROLES.FUTBOLCU;
 
                 roleName =
                     "Futbolcu";
-            }
 
-            else if (
-                type === "kaleci"
+            } else if (
+                type ===
+                "kaleci"
             ) {
+
                 roleId =
                     ROLES.KALECI;
 
                 roleName =
                     "Kaleci";
-            }
 
-            else if (
-                type === "td"
+            } else if (
+                type ===
+                "td"
             ) {
+
                 roleId =
                     ROLES.TEKNIK_DIREKTOR;
 
                 roleName =
                     "Teknik Direktör";
-            }
 
-            else {
+            } else {
+
                 return interaction.reply({
                     content:
                         "❌ Geçersiz rol seçimi.",
-                    ephemeral: true
+                    ephemeral:
+                        true
                 });
             }
 
-            const role =
+            const selectedRole =
                 guild.roles.cache.get(
                     roleId
                 );
 
-            if (!role) {
+            if (!selectedRole) {
+
                 return interaction.reply({
                     content:
                         "❌ Seçilen rol bulunamadı.",
-                    ephemeral: true
+                    ephemeral:
+                        true
                 });
             }
 
             // =================================================
-            // ESKİ ROLLERİ KALDIR
+            // ESKİ ROLLERİ TEMİZLE
             // =================================================
 
             const oldRoles = [
@@ -1374,17 +1585,19 @@ client.on(
                     )
                 ) {
 
-                    await target.roles.remove(
-                        oldRoleId,
-                        "Axera League kayıt"
-                    ).catch(
-                        () => {}
-                    );
+                    await target.roles
+                        .remove(
+                            oldRoleId,
+                            "Axera League kayıt"
+                        )
+                        .catch(
+                            () => {}
+                        );
                 }
             }
 
             // =================================================
-            // KAYITSIZ ROLÜNÜ KALDIR
+            // KAYITSIZ ROLÜ KALDIR
             // =================================================
 
             if (
@@ -1393,12 +1606,14 @@ client.on(
                 )
             ) {
 
-                await target.roles.remove(
-                    ROLES.KAYITSIZ,
-                    "Kayıt tamamlandı"
-                ).catch(
-                    () => {}
-                );
+                await target.roles
+                    .remove(
+                        ROLES.KAYITSIZ,
+                        "Kayıt tamamlandı"
+                    )
+                    .catch(
+                        () => {}
+                    );
             }
 
             // =================================================
@@ -1406,7 +1621,7 @@ client.on(
             // =================================================
 
             await target.roles.add(
-                role,
+                selectedRole,
                 "Axera League kayıt sistemi"
             );
 
@@ -1414,22 +1629,24 @@ client.on(
             // NICK AYARLA
             // =================================================
 
-            const oldNickname =
+            const currentNickname =
                 target.nickname ||
                 target.user.displayName ||
                 target.user.username;
 
-            const oldValue =
+            const currentValue =
                 getPlayerValue(
-                    oldNickname
+                    currentNickname
                 );
 
             let finalNickname =
-                `${registration.nickname} | ${formatMoney(oldValue)}`;
+                `${registration.nickname} | ${formatMoney(currentValue)}`;
 
             if (
-                finalNickname.length > 32
+                finalNickname.length >
+                32
             ) {
+
                 finalNickname =
                     finalNickname.substring(
                         0,
@@ -1437,21 +1654,19 @@ client.on(
                     );
             }
 
-            await target
-                .setNickname(
-                    finalNickname,
-                    "Axera League kayıt"
-                )
-                .catch(
-                    error =>
-                        console.error(
-                            "Nick ayarlanamadı:",
-                            error
-                        )
-                );
+            await target.setNickname(
+                finalNickname,
+                "Axera League kayıt sistemi"
+            ).catch(
+                error =>
+                    console.error(
+                        "Nick ayarlanamadı:",
+                        error
+                    )
+            );
 
             // =================================================
-            // VERİYİ TEMİZLE
+            // KAYDI SİL
             // =================================================
 
             delete data.registrations[
@@ -1470,7 +1685,7 @@ client.on(
 
                         new ButtonBuilder()
                             .setCustomId(
-                                `tamam_${registrationId}`
+                                `kayit_tamam_${Date.now()}`
                             )
                             .setLabel(
                                 `✅ ${roleName} • Kayıt Tamamlandı`
@@ -1485,9 +1700,11 @@ client.on(
 
             const resultEmbed =
                 new EmbedBuilder()
+
                     .setTitle(
-                        "✅ Kayıt Tamamlandı"
+                        "✅ KAYIT TAMAMLANDI"
                     )
+
                     .setDescription(
                         `👤 Oyuncu: ${target}\n` +
                         `🏷️ Takma Adı: **${registration.nickname}**\n` +
@@ -1495,27 +1712,36 @@ client.on(
                         `🛠️ Kayıt Yetkilisi: ${interaction.user}\n\n` +
                         `🎉 **Axera League'e hoş geldin!**`
                     )
+
                     .setThumbnail(
                         target.user.displayAvatarURL({
-                            extension: "png",
-                            size: 256
+                            extension:
+                                "png",
+                            size:
+                                256
                         })
                     )
+
                     .setFooter({
                         text:
                             "Axera League • Kayıt Sistemi"
                     })
+
                     .setTimestamp();
 
             await interaction.update({
-                embeds: [resultEmbed],
+
+                embeds: [
+                    resultEmbed
+                ],
+
                 components: [
                     disabledRow
                 ]
             });
 
             // =================================================
-            // SOHBET KANALINA MESAJ
+            // SOHBET KANALINA KAYIT MESAJI
             // =================================================
 
             const chatChannel =
@@ -1527,9 +1753,11 @@ client.on(
 
                 const chatEmbed =
                     new EmbedBuilder()
+
                         .setTitle(
-                            "🎉 Yeni Oyuncu Kaydı!"
+                            "🎉 YENİ OYUNCU KAYDI!"
                         )
+
                         .setDescription(
                             `**${target}** Axera League'e kayıt oldu!\n\n` +
                             `👤 Oyuncu: ${target}\n` +
@@ -1538,20 +1766,27 @@ client.on(
                             `📝 Kayıt Yetkilisi: ${interaction.user}\n\n` +
                             `🏆 **Axera League'e hoş geldin!**`
                         )
+
                         .setThumbnail(
                             target.user.displayAvatarURL({
-                                extension: "png",
-                                size: 256
+                                extension:
+                                    "png",
+                                size:
+                                    256
                             })
                         )
+
                         .setFooter({
                             text:
                                 "Axera League"
                         })
+
                         .setTimestamp();
 
                 await chatChannel.send({
-                    embeds: [chatEmbed],
+                    embeds: [
+                        chatEmbed
+                    ],
                     allowedMentions: {
                         users: [
                             target.id
@@ -1560,7 +1795,7 @@ client.on(
                 }).catch(
                     error =>
                         console.error(
-                            "Sohbet mesajı gönderilemedi:",
+                            "Sohbet mesaj hatası:",
                             error
                         )
                 );
@@ -1569,7 +1804,7 @@ client.on(
         } catch (error) {
 
             console.error(
-                "Button hatası:",
+                "Kayıt buton hatası:",
                 error
             );
 
@@ -1579,10 +1814,12 @@ client.on(
                     !interaction.replied &&
                     !interaction.deferred
                 ) {
+
                     await interaction.reply({
                         content:
                             "❌ Kayıt sırasında bir hata oluştu.",
-                        ephemeral: true
+                        ephemeral:
+                            true
                     });
                 }
 
@@ -1598,6 +1835,7 @@ client.on(
 process.on(
     "unhandledRejection",
     error => {
+
         console.error(
             "Unhandled Rejection:",
             error
@@ -1608,6 +1846,7 @@ process.on(
 process.on(
     "uncaughtException",
     error => {
+
         console.error(
             "Uncaught Exception:",
             error
@@ -1616,12 +1855,13 @@ process.on(
 );
 
 // ============================================================
-// LOGIN
+// BOT LOGIN
 // ============================================================
 
 if (
     !TOKEN ||
-    TOKEN === "BURAYA_BOT_TOKENINI_YAZ"
+    TOKEN ===
+        "BURAYA_BOT_TOKENINI_YAZ"
 ) {
 
     console.error(
@@ -1635,8 +1875,16 @@ if (
 } else {
 
     client.login(TOKEN)
+        .then(() => {
+
+            console.log(
+                "Discord'a bağlanılıyor..."
+            );
+
+        })
         .catch(
             error => {
+
                 console.error(
                     "❌ Discord giriş hatası:",
                     error

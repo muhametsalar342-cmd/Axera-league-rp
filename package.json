@@ -6,11 +6,10 @@
   "scripts": {
     "start": "node index.js"
   },
-  "dependencies": {
-    "discord.js": "^14.25.1",
-    "dotenv": "^17.2.2"
-  },
   "engines": {
     "node": ">=18.17.0"
+  },
+  "dependencies": {
+    "discord.js": "^14.25.1"
   }
 }

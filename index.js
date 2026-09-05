@@ -1,19 +1,3 @@
-/*
-╔══════════════════════════════════════════════════════════════╗
-║                    AXERA LEAGUE BOT                         ║
-║                     index.js - v1.0                         ║
-╚══════════════════════════════════════════════════════════════╝
-
-Node.js + Discord.js v14
-
-TOKEN:
-Hosting ortam değişkenine:
-TOKEN=BOT_TOKENIN
-
-ÇALIŞTIRMA:
-node index.js
-*/
-
 const {
     Client,
     GatewayIntentBits,

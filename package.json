@@ -1,6 +1,6 @@
 {
   "name": "axera-league-bot",
-  "version": "1.0.0",
+  "version": "3.0.0",
   "description": "Axera League Football RP Discord Bot",
   "main": "index.js",
   "scripts": {
@@ -8,9 +8,10 @@
   },
   "dependencies": {
     "discord.js": "^14.22.1",
-    "dotenv": "^16.6.1"
+    "dotenv": "^16.6.1",
+    "openai": "^7.12.1"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.0.0"
   }
 }

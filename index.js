@@ -13,16 +13,14 @@ const {
   ChannelType
 } = require("discord.js");
 
+const OpenAI = require("openai");
 const fs = require("fs");
 const path = require("path");
-const OpenAI = require("openai");
 
 /* =========================================================
    AXERA LEAGUE
-   FOOTBALL RP DISCORD BOT
+   TEK PARÇA BOT
    ========================================================= */
-
-/* -------------------- AYARLAR -------------------- */
 
 const PREFIX = ".";
 
@@ -73,14 +71,11 @@ const FORMATIONS = [
 ];
 
 const COMMAND_COUNT = 45;
-
 const AI_MODEL = "gpt-5.6-luna";
 
-const openai = process.env.OPENAI_API_KEY
-  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-  : null;
-
-/* -------------------- CLIENT -------------------- */
+/* =========================================================
+   CLIENT
+   ========================================================= */
 
 const client = new Client({
   intents: [
@@ -94,12 +89,22 @@ const client = new Client({
 });
 
 /* =========================================================
+   OPENAI
+   ========================================================= */
+
+const openai = process.env.OPENAI_API_KEY
+  ? new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY
+    })
+  : null;
+
+/* =========================================================
    DATA
    ========================================================= */
 
 const DATA_FILE = path.join(__dirname, "data.json");
 
-const defaultData = {
+const DEFAULT_DATA = {
   users: {},
   teams: {},
   standings: {},
@@ -120,31 +125,40 @@ const defaultData = {
   aiMemory: {}
 };
 
-let data = loadData();
-
 function loadData() {
   try {
     if (!fs.existsSync(DATA_FILE)) {
-      fs.writeFileSync(DATA_FILE, JSON.stringify(defaultData, null, 2));
-      return JSON.parse(JSON.stringify(defaultData));
+      fs.writeFileSync(
+        DATA_FILE,
+        JSON.stringify(DEFAULT_DATA, null, 2)
+      );
+
+      return structuredClone(DEFAULT_DATA);
     }
 
-    const parsed = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+    const parsed = JSON.parse(
+      fs.readFileSync(DATA_FILE, "utf8")
+    );
 
     return {
-      ...JSON.parse(JSON.stringify(defaultData)),
+      ...structuredClone(DEFAULT_DATA),
       ...parsed
     };
   } catch (error) {
-    console.error("data.json okunamadı:", error);
+    console.error("DATA HATASI:", error);
 
     try {
-      fs.writeFileSync(DATA_FILE, JSON.stringify(defaultData, null, 2));
+      fs.writeFileSync(
+        DATA_FILE,
+        JSON.stringify(DEFAULT_DATA, null, 2)
+      );
     } catch {}
 
-    return JSON.parse(JSON.stringify(defaultData));
+    return structuredClone(DEFAULT_DATA);
   }
 }
+
+let data = loadData();
 
 let saveTimer = null;
 
@@ -153,37 +167,50 @@ function saveData() {
 
   saveTimer = setTimeout(() => {
     try {
-      fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+      fs.writeFileSync(
+        DATA_FILE,
+        JSON.stringify(data, null, 2)
+      );
     } catch (error) {
-      console.error("data.json kaydetme hatası:", error);
+      console.error("DATA KAYDETME HATASI:", error);
     }
-  }, 250);
+  }, 200);
 }
 
 /* =========================================================
-   GENEL YARDIMCILAR
+   GENEL FONKSİYONLAR
    ========================================================= */
 
 function isAdmin(member) {
   return Boolean(
     member &&
     (
-      member.permissions?.has(PermissionsBitField.Flags.Administrator) ||
+      member.permissions?.has(
+        PermissionsBitField.Flags.Administrator
+      ) ||
       member.roles?.cache?.has(IDS.roles.admin)
     )
   );
 }
 
 function hasRole(member, roleId) {
-  return Boolean(member?.roles?.cache?.has(roleId));
+  return Boolean(
+    member?.roles?.cache?.has(roleId)
+  );
 }
 
 function isRegistrationStaff(member) {
-  return isAdmin(member) || hasRole(member, IDS.roles.registration);
+  return (
+    isAdmin(member) ||
+    hasRole(member, IDS.roles.registration)
+  );
 }
 
 function isValueStaff(member) {
-  return isAdmin(member) || hasRole(member, IDS.roles.value);
+  return (
+    isAdmin(member) ||
+    hasRole(member, IDS.roles.value)
+  );
 }
 
 function isCommentator(member) {
@@ -200,14 +227,6 @@ function isModerator(member) {
   );
 }
 
-function isMentioned(message) {
-  return message.mentions.users.first() || null;
-}
-
-function cleanText(text) {
-  return String(text || "").trim();
-}
-
 function normalize(text) {
   return String(text || "")
     .toLocaleLowerCase("tr-TR")
@@ -215,167 +234,260 @@ function normalize(text) {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
-function formatMoney(m) {
-  const n = Number(m) || 0;
-  return `${n}M€`;
+function formatMoney(value) {
+  return `${Number(value || 0)}M€`;
+}
+
+function parseMoney(input) {
+  if (!input) return null;
+
+  const value = String(input)
+    .trim()
+    .toUpperCase()
+    .replace(/€/g, "")
+    .replace(/M/g, "");
+
+  if (!/^\d+(?:\.\d+)?$/.test(value)) {
+    return null;
+  }
+
+  const number = Number(value);
+
+  if (!Number.isFinite(number) || number <= 0) {
+    return null;
+  }
+
+  return number;
 }
 
 function ensureUser(userId) {
   if (!data.users[userId]) {
     data.users[userId] = {
-      value: 0,
+      value: null,
       registered: false,
-      training: 0,
-      goals: 0,
-      assists: 0,
-      matches: 0
+      training: 0
     };
   }
 
   return data.users[userId];
 }
 
-function ensureTeam(roleId, name = "Takım") {
-  if (!data.teams[roleId]) {
-    data.teams[roleId] = {
-      name,
-      value: 0,
-      players: [],
-      cups: [],
-      points: 0,
-      goalsFor: 0,
-      goalsAgainst: 0,
-      wins: 0,
-      draws: 0,
-      losses: 0
-    };
+/* =========================================================
+   ÖNEMLİ DEĞER SİSTEMİ
+   ========================================================= */
+
+/*
+   Kullanıcının kayıtlı değeri varsa onu kullanır.
+   Ancak data.json'da değer yoksa nickname'deki M€ değerini
+   okuyup başlangıç değeri olarak kaydeder.
+
+   Örnek:
+   Nickname: W.Sneijder | 🇵🇹 | SNT | 50M€
+
+   data.json değeri yoksa:
+   50M€ olarak alınır.
+
+   .dver @W.Sneijder 5M
+   => 50 + 5 = 55M€
+
+   .dsil @W.Sneijder 10M
+   => 55 - 10 = 45M€
+*/
+
+function readNicknameValue(member) {
+  const nickname =
+    member.displayName ||
+    member.user?.username ||
+    "";
+
+  const match =
+    nickname.match(/(\d+(?:\.\d+)?)M€\s*$/i);
+
+  if (!match) {
+    return null;
   }
 
-  return data.teams[roleId];
-}
+  const value = Number(match[1]);
 
-function ensureStats(userId) {
-  if (!data.stats[userId]) {
-    data.stats[userId] = {
-      goals: 0,
-      assists: 0,
-      matches: 0
-    };
+  if (!Number.isFinite(value)) {
+    return null;
   }
-
-  return data.stats[userId];
-}
-
-function getValue(userId) {
-  return Number(ensureUser(userId).value || 0);
-}
-
-function setValue(userId, value) {
-  const user = ensureUser(userId);
-  user.value = Math.max(0, Math.min(1000, Number(value) || 0));
-  saveData();
-}
-
-function addValue(userId, amount) {
-  setValue(userId, getValue(userId) + Number(amount || 0));
-}
-
-function removeValue(userId, amount) {
-  setValue(userId, getValue(userId) - Number(amount || 0));
-}
-
-function getDisplayValue(member) {
-  const user = ensureUser(member.id);
-
-  if (user.value > 0) {
-    return formatMoney(user.value);
-  }
-
-  const nick = member.displayName || member.user.username;
-  const match = nick.match(/(\d+(?:\.\d+)?)M€\s*$/i);
-
-  return match ? `${match[1]}M€` : "0M€";
-}
-
-function getTrailingValue(member) {
-  const nick = member.displayName || member.user.username;
-
-  const match = nick.match(/(\d+(?:\.\d+)?)M€\s*$/i);
-
-  if (!match) return null;
-
-  return Number(match[1]);
-}
-
-function parseMoney(input) {
-  const raw = String(input || "")
-    .trim()
-    .toUpperCase()
-    .replace(/€/g, "")
-    .replace(/M/g, "");
-
-  if (!/^\d+(?:\.\d+)?$/.test(raw)) return null;
-
-  const value = Number(raw);
-
-  if (!Number.isFinite(value) || value <= 0) return null;
 
   return value;
 }
 
-function getPositionFromNickname(member) {
-  const nick = member.displayName || "";
+function getValue(memberOrId, guild = null) {
+  let userId;
+  let member = null;
 
-  const parts = nick.split("|").map(x => x.trim());
+  if (typeof memberOrId === "string") {
+    userId = memberOrId;
 
-  if (parts.length >= 3) {
-    return parts[2];
+    if (guild) {
+      member =
+        guild.members.cache.get(userId) || null;
+    }
+  } else {
+    member = memberOrId;
+    userId = member.id;
   }
 
-  return "OY";
-}
+  const user = ensureUser(userId);
 
-function randomItem(array) {
-  return array[Math.floor(Math.random() * array.length)];
-}
+  /*
+   * Daha önce kayıtlı bir değer varsa onu kullan.
+   */
+  if (
+    user.value !== null &&
+    user.value !== undefined &&
+    Number.isFinite(Number(user.value))
+  ) {
+    return Number(user.value);
+  }
 
-function splitMessage(text, max = 1900) {
-  const chunks = [];
+  /*
+   * data.json'da değer yoksa nickname'den al.
+   */
+  if (member) {
+    const nicknameValue =
+      readNicknameValue(member);
 
-  let current = "";
+    if (nicknameValue !== null) {
+      user.value = nicknameValue;
+      saveData();
 
-  for (const line of String(text).split("\n")) {
-    if ((current + "\n" + line).length > max) {
-      if (current) chunks.push(current);
-      current = line;
-    } else {
-      current += current ? "\n" + line : line;
+      return nicknameValue;
     }
   }
 
-  if (current) chunks.push(current);
-
-  return chunks.length ? chunks : [" "];
+  return 0;
 }
 
-async function safeReply(message, content, options = {}) {
+function setValue(member, value) {
+  const newValue =
+    Math.max(
+      0,
+      Math.min(
+        1000,
+        Number(value) || 0
+      )
+    );
+
+  const user = ensureUser(member.id);
+
+  user.value = newValue;
+
+  saveData();
+
+  return newValue;
+}
+
+function addValue(member, amount) {
+  const oldValue =
+    getValue(member, member.guild);
+
+  return setValue(
+    member,
+    oldValue + Number(amount || 0)
+  );
+}
+
+function removeValue(member, amount) {
+  const oldValue =
+    getValue(member, member.guild);
+
+  return setValue(
+    member,
+    oldValue - Number(amount || 0)
+  );
+}
+
+async function updateNicknameValue(
+  member,
+  newValue
+) {
+  const nickname =
+    member.displayName ||
+    member.user.username;
+
+  const regex =
+    /(\d+(?:\.\d+)?)M€\s*$/i;
+
+  let newNickname;
+
+  if (regex.test(nickname)) {
+    /*
+     * Sadece sondaki M€ kısmını değiştirir.
+     * İsim, bayrak ve pozisyon korunur.
+     */
+    newNickname =
+      nickname.replace(
+        regex,
+        `${newValue}M€`
+      );
+  } else {
+    /*
+     * Eski nickname'de değer yoksa sonuna ekler.
+     */
+    newNickname =
+      `${nickname} | ${newValue}M€`;
+  }
+
+  newNickname =
+    newNickname.substring(0, 32);
+
   try {
-    return await message.reply({
-      content,
-      ...options
-    });
+    await member.setNickname(
+      newNickname
+    );
   } catch (error) {
-    console.error("Reply hatası:", error);
+    console.error(
+      "NICKNAME DEĞİŞTİRME HATASI:",
+      error.message
+    );
+  }
+}
+
+/* =========================================================
+   GÜVENLİ MESAJ
+   ========================================================= */
+
+async function safeReply(
+  message,
+  payload
+) {
+  try {
+    return await message.reply(
+      typeof payload === "string"
+        ? { content: payload }
+        : payload
+    );
+  } catch (error) {
+    console.error(
+      "REPLY HATASI:",
+      error.message
+    );
+
     return null;
   }
 }
 
-async function safeSend(channel, payload) {
+async function safeSend(
+  channel,
+  payload
+) {
   try {
-    if (!channel?.isTextBased?.()) return null;
+    if (!channel?.isTextBased?.()) {
+      return null;
+    }
+
     return await channel.send(payload);
   } catch (error) {
-    console.error("Mesaj gönderme hatası:", error);
+    console.error(
+      "SEND HATASI:",
+      error.message
+    );
+
     return null;
   }
 }
@@ -388,16 +500,16 @@ async function safeDelete(message) {
   } catch {}
 }
 
-/* =========================================================
-   KANAL KONTROLÜ
-   ========================================================= */
-
-function onlyChannel(message, channelId) {
+function onlyChannel(
+  message,
+  channelId
+) {
   if (message.channel.id !== channelId) {
     safeReply(
       message,
       `❌ Bu komut <#${channelId}> kanalında kullanılmalıdır.`
     );
+
     return false;
   }
 
@@ -405,136 +517,33 @@ function onlyChannel(message, channelId) {
 }
 
 /* =========================================================
-   KAYIT SİSTEMİ
+   KAYIT
    ========================================================= */
 
-async function createRegistrationPanel(channel) {
-  if (!channel) return;
-
-  const embed = new EmbedBuilder()
-    .setTitle("📝 Axera League Kayıt")
-    .setDescription(
-      [
-        "Sunucuya kayıt olmak için aşağıdaki seçeneklerden birini seçin.",
-        "",
-        "⚽ **Futbolcu**",
-        "👤 **Üye**",
-        "🧑‍💼 **Teknik Direktör**",
-        "🧤 **Kaleci**",
-        "",
-        "Kayıt işlemini yalnızca **Kayıt Yetkilileri** gerçekleştirebilir."
-      ].join("\n")
+async function handleRegister(
+  message,
+  args
+) {
+  if (
+    !onlyChannel(
+      message,
+      IDS.channels.registration
     )
-    .setFooter({
-      text: "Axera League • Kayıt Sistemi"
-    })
-    .setTimestamp();
+  ) return;
 
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("register_player")
-      .setLabel("Futbolcu")
-      .setEmoji("⚽")
-      .setStyle(ButtonStyle.Primary),
-
-    new ButtonBuilder()
-      .setCustomId("register_member")
-      .setLabel("Üye")
-      .setEmoji("👤")
-      .setStyle(ButtonStyle.Secondary),
-
-    new ButtonBuilder()
-      .setCustomId("register_td")
-      .setLabel("Teknik Direktör")
-      .setEmoji("🧑‍💼")
-      .setStyle(ButtonStyle.Success),
-
-    new ButtonBuilder()
-      .setCustomId("register_gk")
-      .setLabel("Kaleci")
-      .setEmoji("🧤")
-      .setStyle(ButtonStyle.Primary)
-  );
-
-  return safeSend(channel, {
-    embeds: [embed],
-    components: [row]
-  });
-}
-
-async function registerUser(targetMember, type, nickname, actor) {
-  const guild = targetMember.guild;
-
-  const rolesToRemove = [
-    IDS.roles.unregistered,
-    IDS.roles.player,
-    IDS.roles.member,
-    IDS.roles.td
-  ];
-
-  for (const roleId of rolesToRemove) {
-    if (targetMember.roles.cache.has(roleId)) {
-      try {
-        await targetMember.roles.remove(roleId);
-      } catch {}
-    }
-  }
-
-  let roleId = IDS.roles.player;
-  let roleName = "Futbolcu";
-
-  if (type === "member") {
-    roleId = IDS.roles.member;
-    roleName = "Üye";
-  }
-
-  if (type === "td") {
-    roleId = IDS.roles.td;
-    roleName = "Teknik Direktör";
-  }
-
-  if (type === "gk") {
-    roleId = IDS.roles.player;
-    roleName = "Kaleci";
-  }
-
-  try {
-    await targetMember.roles.add(roleId);
-  } catch (error) {
-    console.error("Kayıt rolü verilemedi:", error);
-  }
-
-  if (nickname) {
-    try {
-      await targetMember.setNickname(
-        nickname.substring(0, 32)
-      );
-    } catch {}
-  }
-
-  const user = ensureUser(targetMember.id);
-  user.registered = true;
-
-  saveData();
-
-  return roleName;
-}
-
-/* =========================================================
-   .K KOMUTU
-   ========================================================= */
-
-async function handleRegisterCommand(message, args) {
-  if (!onlyChannel(message, IDS.channels.registration)) return;
-
-  if (!isRegistrationStaff(message.member)) {
+  if (
+    !isRegistrationStaff(
+      message.member
+    )
+  ) {
     return safeReply(
       message,
-      "❌ Bu paneli yalnızca **Kayıt Yetkilisi** veya **Yönetici** kullanabilir."
+      "❌ Kayıt panelini yalnızca **Kayıt Yetkilisi** veya **Yönetici** kullanabilir."
     );
   }
 
-  const target = message.mentions.members.first();
+  const target =
+    message.mentions.members.first();
 
   if (!target) {
     return safeReply(
@@ -543,61 +552,88 @@ async function handleRegisterCommand(message, args) {
     );
   }
 
-  const nickname = args
-    .filter(arg => !/^<@!?\d+>$/.test(arg))
-    .join(" ")
-    .trim();
+  const nickname =
+    args
+      .filter(
+        x => !/^<@!?\d+>$/.test(x)
+      )
+      .join(" ")
+      .trim();
 
   if (!nickname) {
     return safeReply(
       message,
-      "❌ Kayıt isminden sonra bir isim yazmalısın.\nÖrnek: `.k @Oyuncu W. Sneijder | 🇵🇹 | SNT | 1M€`"
+      "❌ Kullanıcının kayıt ismini yazmalısın."
     );
   }
 
-  const embed = new EmbedBuilder()
-    .setTitle("📝 Kayıt İşlemi")
-    .setDescription(
-      `${target} için kayıt türünü seçin.\n\n` +
-      `**Kayıt Yetkilisi:** ${message.author}\n` +
-      `**İsim:** \`${nickname}\``
-    )
-    .setColor(0x2b2d31)
-    .setTimestamp();
+  const embed =
+    new EmbedBuilder()
+      .setTitle("📝 Axera League Kayıt")
+      .setDescription(
+        `${target} için kayıt türünü seç.\n\n` +
+        `📝 **İsim:** ${nickname}\n` +
+        `🛡️ **Yetkili:** ${message.author}`
+      )
+      .setTimestamp();
 
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId(`regtype_player_${target.id}`)
-      .setLabel("Futbolcu")
-      .setEmoji("⚽")
-      .setStyle(ButtonStyle.Primary),
+  const row =
+    new ActionRowBuilder()
+      .addComponents(
+        new ButtonBuilder()
+          .setCustomId(
+            `reg_player_${target.id}`
+          )
+          .setLabel("Futbolcu")
+          .setEmoji("⚽")
+          .setStyle(
+            ButtonStyle.Primary
+          ),
 
-    new ButtonBuilder()
-      .setCustomId(`regtype_member_${target.id}`)
-      .setLabel("Üye")
-      .setEmoji("👤")
-      .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(
+            `reg_member_${target.id}`
+          )
+          .setLabel("Üye")
+          .setEmoji("👤")
+          .setStyle(
+            ButtonStyle.Secondary
+          ),
 
-    new ButtonBuilder()
-      .setCustomId(`regtype_td_${target.id}`)
-      .setLabel("Teknik Direktör")
-      .setEmoji("🧑‍💼")
-      .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId(
+            `reg_td_${target.id}`
+          )
+          .setLabel("Teknik Direktör")
+          .setEmoji("🧑‍💼")
+          .setStyle(
+            ButtonStyle.Success
+          ),
 
-    new ButtonBuilder()
-      .setCustomId(`regtype_gk_${target.id}`)
-      .setLabel("Kaleci")
-      .setEmoji("🧤")
-      .setStyle(ButtonStyle.Primary)
-  );
+        new ButtonBuilder()
+          .setCustomId(
+            `reg_gk_${target.id}`
+          )
+          .setLabel("Kaleci")
+          .setEmoji("🧤")
+          .setStyle(
+            ButtonStyle.Primary
+          )
+      );
 
-  const panel = await safeSend(message.channel, {
-    embeds: [embed],
-    components: [row]
-  });
+  const panel =
+    await safeSend(
+      message.channel,
+      {
+        embeds: [embed],
+        components: [row]
+      }
+    );
 
   if (panel) {
-    data.registrationPanels[panel.id] = {
+    data.registrationPanels[
+      panel.id
+    ] = {
       targetId: target.id,
       nickname,
       staffId: message.author.id
@@ -607,19 +643,106 @@ async function handleRegisterCommand(message, args) {
   }
 }
 
-/* =========================================================
-   .KAYITSIZVER
-   ========================================================= */
+async function registerMember(
+  member,
+  type,
+  nickname
+) {
+  const removeRoles = [
+    IDS.roles.unregistered,
+    IDS.roles.player,
+    IDS.roles.member,
+    IDS.roles.td
+  ];
 
-async function handleUnregister(message, args) {
-  if (!isRegistrationStaff(message.member)) {
-    return safeReply(message, "❌ Bu komut için Kayıt Yetkilisi olmalısın.");
+  for (const roleId of removeRoles) {
+    try {
+      if (
+        member.roles.cache.has(roleId)
+      ) {
+        await member.roles.remove(
+          roleId
+        );
+      }
+    } catch {}
   }
 
-  const target = message.mentions.members.first();
+  let roleId =
+    IDS.roles.player;
+
+  if (type === "member") {
+    roleId =
+      IDS.roles.member;
+  }
+
+  if (type === "td") {
+    roleId =
+      IDS.roles.td;
+  }
+
+  if (type === "gk") {
+    roleId =
+      IDS.roles.player;
+  }
+
+  try {
+    await member.roles.add(
+      roleId
+    );
+  } catch {}
+
+  try {
+    await member.setNickname(
+      nickname.substring(0, 32)
+    );
+  } catch {}
+
+  const user =
+    ensureUser(member.id);
+
+  user.registered = true;
+
+  /*
+   * Yeni kayıt sırasında nickname'de M€ varsa
+   * başlangıç değeri olarak sakla.
+   */
+  const nicknameValue =
+    readNicknameValue(member);
+
+  if (
+    nicknameValue !== null
+  ) {
+    user.value =
+      nicknameValue;
+  }
+
+  saveData();
+
+  return roleId;
+}
+
+async function handleUnregister(
+  message
+) {
+  if (
+    !isRegistrationStaff(
+      message.member
+    )
+  ) {
+    return safeReply(
+      message,
+      "❌ Bu komut Kayıt Yetkilisi/Yönetici içindir."
+    );
+  }
+
+  const target =
+    message.mentions.members.first();
 
   if (!target) {
-    return safeReply(message, "❌ Kullanım: `.kayıtsızver @Oyuncu`");
+    return safeReply(
+      message,
+      "❌ Kullanım: `.kayıtsızver @Oyuncu`"
+    );
   }
 
   for (const roleId of [
@@ -628,55 +751,103 @@ async function handleUnregister(message, args) {
     IDS.roles.td
   ]) {
     try {
-      await target.roles.remove(roleId);
+      await target.roles.remove(
+        roleId
+      );
     } catch {}
   }
 
   try {
-    await target.roles.add(IDS.roles.unregistered);
+    await target.roles.add(
+      IDS.roles.unregistered
+    );
   } catch {}
 
-  ensureUser(target.id).registered = false;
+  ensureUser(
+    target.id
+  ).registered = false;
+
   saveData();
 
-  safeReply(message, `✅ ${target} tekrar **Kayıtsız** yapıldı.`);
+  safeReply(
+    message,
+    `✅ ${target} tekrar **Kayıtsız** yapıldı.`
+  );
 }
 
 /* =========================================================
    ARA
    ========================================================= */
 
-async function handleSearch(message, args) {
-  const query = normalize(args.join(" "));
+async function handleSearch(
+  message,
+  args
+) {
+  const query =
+    normalize(
+      args.join(" ")
+    );
 
   if (!query) {
-    return safeReply(message, "❌ Kullanım: `.ara isim`");
+    return safeReply(
+      message,
+      "❌ Kullanım: `.ara isim`"
+    );
   }
 
   const results = [];
 
-  for (const member of message.guild.members.cache.values()) {
+  for (
+    const member
+    of message.guild.members.cache.values()
+  ) {
     if (member.user.bot) continue;
 
-    if (member.roles.cache.has(IDS.roles.unregistered)) continue;
+    if (
+      member.roles.cache.has(
+        IDS.roles.unregistered
+      )
+    ) continue;
 
     const names = [
-      member.displayName,
-      member.user.username
-    ].map(normalize);
+      normalize(member.displayName),
+      normalize(member.user.username)
+    ];
 
     let score = 0;
 
-    if (names.some(x => x === query)) score = 100;
-    else if (names.some(x => x.startsWith(query))) score = 75;
-    else if (names.some(x => x.includes(query))) score = 50;
+    if (
+      names.some(
+        x => x === query
+      )
+    ) {
+      score = 100;
+    } else if (
+      names.some(
+        x => x.startsWith(query)
+      )
+    ) {
+      score = 75;
+    } else if (
+      names.some(
+        x => x.includes(query)
+      )
+    ) {
+      score = 50;
+    }
 
     if (score > 0) {
-      results.push({ member, score });
+      results.push({
+        member,
+        score
+      });
     }
   }
 
-  results.sort((a, b) => b.score - a.score);
+  results.sort(
+    (a, b) =>
+      b.score - a.score
+  );
 
   if (!results.length) {
     return safeReply(
@@ -685,22 +856,37 @@ async function handleSearch(message, args) {
     );
   }
 
-  const lines = results.slice(0, 20).map((item, index) => {
-    const member = item.member;
+  const lines =
+    results
+      .slice(0, 20)
+      .map(
+        (item, index) => {
+          const member =
+            item.member;
 
-    const role = member.roles.cache.has(IDS.roles.td)
-      ? "Teknik Direktör"
-      : member.roles.cache.has(IDS.roles.player)
-        ? "Futbolcu"
-        : "Üye";
+          const role =
+            member.roles.cache.has(
+              IDS.roles.td
+            )
+              ? "Teknik Direktör"
+              : member.roles.cache.has(
+                  IDS.roles.player
+                )
+                ? "Futbolcu"
+                : "Üye";
 
-    return [
-      `**${index + 1}. ${member.displayName}**`,
-      `> ID: \`${member.id}\``,
-      `> Tür: **${role}**`,
-      `> Değer: **${getDisplayValue(member)}**`
-    ].join("\n");
-  });
+          return (
+            `**${index + 1}. ${member.displayName}**\n` +
+            `> Tür: **${role}**\n` +
+            `> Değer: **${formatMoney(
+              getValue(
+                member,
+                message.guild
+              )
+            )}**`
+          );
+        }
+      );
 
   safeReply(
     message,
@@ -709,46 +895,79 @@ async function handleSearch(message, args) {
 }
 
 /* =========================================================
-   DEĞER
+   DVER / DSİL
    ========================================================= */
 
-async function handleValueCommand(message, args, adding = true) {
-  if (!onlyChannel(message, IDS.channels.value)) return;
+async function handleValue(
+  message,
+  args,
+  adding
+) {
+  if (
+    !onlyChannel(
+      message,
+      IDS.channels.value
+    )
+  ) return;
 
-  if (!isValueStaff(message.member)) {
+  if (
+    !isValueStaff(
+      message.member
+    )
+  ) {
     return safeReply(
       message,
       "❌ Bu komut yalnızca **Değer Yetkilisi** veya **Yönetici** tarafından kullanılabilir."
     );
   }
 
-  const target = message.mentions.members.first();
+  const target =
+    message.mentions.members.first();
 
   if (!target) {
     return safeReply(
       message,
-      `❌ Kullanım: \`.${adding ? "dver" : "dsil"} @Oyuncu miktar\``
+      `❌ Kullanım: \`.${adding ? "dver" : "dsil"} @Oyuncu 5M\``
     );
   }
 
-  const amountArg = args.find(x =>
-    /^\d+(?:\.\d+)?M?€?$/i.test(x)
-  );
+  const amountArg =
+    args.find(
+      x =>
+        /^\d+(?:\.\d+)?M?€?$/i.test(x)
+    );
 
-  const amount = parseMoney(amountArg);
+  const amount =
+    parseMoney(amountArg);
 
   if (!amount) {
     return safeReply(
       message,
-      "❌ Geçerli bir M€ miktarı gir.\nÖrnek: `5M`, `5M€`"
+      "❌ Sadece M€ değeri gir.\nÖrnek: `5M` veya `5M€`"
     );
   }
 
-  const oldValue = getValue(target.id);
+  /*
+   * BURASI ÖNEMLİ:
+   * Önce mevcut nickname/data değerini okur.
+   */
+  const oldValue =
+    getValue(
+      target,
+      message.guild
+    );
 
-  const newValue = adding
-    ? oldValue + amount
-    : oldValue - amount;
+  /*
+   * DVER:
+   * Eski + verilen
+   *
+   * DSİL:
+   * Eski - verilen
+   */
+  const newValue =
+    adding
+      ? oldValue + amount
+      : oldValue - amount;
 
   if (newValue > 1000) {
     return safeReply(
@@ -764,33 +983,38 @@ async function handleValueCommand(message, args, adding = true) {
     );
   }
 
-  setValue(target.id, newValue);
+  /*
+   * Önce data.json'a kaydet.
+   */
+  setValue(
+    target,
+    newValue
+  );
 
-  const oldNick = target.displayName;
+  /*
+   * Sonra nickname'deki SADECE
+   * son M€ kısmını değiştir.
+   */
+  await updateNicknameValue(
+    target,
+    newValue
+  );
 
-  const valueRegex = /(\d+(?:\.\d+)?)M€\s*$/i;
-
-  let newNick;
-
-  if (valueRegex.test(oldNick)) {
-    newNick = oldNick.replace(
-      valueRegex,
-      `${newValue}M€`
-    );
-  } else {
-    newNick = `${oldNick} | ${newValue}M€`;
-  }
-
-  try {
-    await target.setNickname(newNick.substring(0, 32));
-  } catch {}
+  const operation =
+    adding
+      ? "değer eklendi"
+      : "değer çıkarıldı";
 
   safeReply(
     message,
-    `${adding ? "✅ Değer eklendi" : "✅ Değer silindi"}.\n` +
-    `${target}\n` +
-    `**Eski:** ${formatMoney(oldValue)}\n` +
-    `**Yeni:** ${formatMoney(newValue)}`
+    [
+      `✅ **${operation}**`,
+      "",
+      `👤 Oyuncu: ${target}`,
+      `📉 Eski değer: **${formatMoney(oldValue)}**`,
+      `➕ İşlem: **${adding ? "+" : "-"}${formatMoney(amount)}**`,
+      `📈 Yeni değer: **${formatMoney(newValue)}**`
+    ].join("\n")
   );
 }
 
@@ -798,24 +1022,39 @@ async function handleValueCommand(message, args, adding = true) {
    ANTRENMAN
    ========================================================= */
 
-async function handleTraining(message) {
-  if (!onlyChannel(message, IDS.channels.training)) return;
+async function handleTraining(
+  message
+) {
+  if (
+    !onlyChannel(
+      message,
+      IDS.channels.training
+    )
+  ) return;
 
-  const user = ensureUser(message.author.id);
+  const user =
+    ensureUser(
+      message.author.id
+    );
 
-  user.training = Number(user.training || 0) + 1;
+  user.training =
+    Number(user.training || 0) + 1;
 
   if (user.training >= 5) {
     user.training = 0;
-    addValue(message.author.id, 3);
+
+    addValue(
+      message.member,
+      3
+    );
 
     saveData();
 
     return safeReply(
       message,
-      "🏋️ **Antrenman tamamlandı!**\n\n" +
-      "📈 Antrenman: **5/5 → 0/5**\n" +
-      "💰 Ödül: **+3M€**"
+      "🏋️ **ANTRENMAN TAMAMLANDI!**\n\n" +
+      "📊 **5/5 → 0/5**\n" +
+      "💰 **+3M€** değer kazandın."
     );
   }
 
@@ -823,9 +1062,7 @@ async function handleTraining(message) {
 
   safeReply(
     message,
-    `🏋️ Antrenman yapıldı!\n\n` +
-    `📊 İlerleme: **${user.training}/5**\n` +
-    `💡 5/5 olduğunda **+3M€** kazanırsın.`
+    `🏋️ Antrenman yapıldı!\n\n📊 İlerleme: **${user.training}/5**\n💰 5/5 olduğunda **+3M€**`
   );
 }
 
@@ -833,46 +1070,43 @@ async function handleTraining(message) {
    PENALTI
    ========================================================= */
 
-async function handlePenalty(message) {
-  if (!onlyChannel(message, IDS.channels.penalty)) return;
+async function handlePenalty(
+  message
+) {
+  if (
+    !onlyChannel(
+      message,
+      IDS.channels.penalty
+    )
+  ) return;
 
-  const roll = Math.random();
+  const random =
+    Math.random();
 
-  let result;
-
-  if (roll < 0.50) {
-    result = "goal";
-  } else if (roll < 0.75) {
-    result = "post";
-  } else {
-    result = "save";
-  }
-
-  if (result === "goal") {
-    addValue(message.author.id, 5);
-
-    ensureStats(message.author.id).goals++;
+  if (random < 0.5) {
+    addValue(
+      message.member,
+      5
+    );
 
     return safeReply(
       message,
       "⚽ **GOOOL!**\n\n" +
-      "🧤 Axera Kalecisi penaltıyı çıkaramadı.\n" +
-      "💰 Ödül: **+5M€**"
+      "🧤 Axera Kalecisi topu çıkaramadı.\n" +
+      "💰 **+5M€** değer kazandın."
     );
   }
 
-  if (result === "post") {
+  if (random < 0.75) {
     return safeReply(
       message,
-      "🥅 **DİREK!**\n\n" +
-      "Top direkten döndü."
+      "🥅 **DİREK!**\n\nTop direkten döndü."
     );
   }
 
   return safeReply(
     message,
-    "🧤 **KURTARDI!**\n\n" +
-    "Axera Kalecisi penaltıyı kurtardı."
+    "🧤 **KURTARIŞ!**\n\nAxera Kalecisi penaltıyı kurtardı."
   );
 }
 
@@ -880,66 +1114,124 @@ async function handlePenalty(message) {
    TWEET
    ========================================================= */
 
-async function handleTweet(message, args) {
-  if (!onlyChannel(message, IDS.channels.tweet)) return;
+async function handleTweet(
+  message,
+  args
+) {
+  if (
+    !onlyChannel(
+      message,
+      IDS.channels.tweet
+    )
+  ) return;
 
-  const text = args.join(" ").trim();
+  const text =
+    args.join(" ").trim();
 
   if (!text) {
-    return safeReply(message, "❌ Kullanım: `.tweet mesaj`");
-  }
-
-  const last = Number(data.tweetCooldowns[message.author.id] || 0);
-  const now = Date.now();
-
-  if (now - last < 24 * 60 * 60 * 1000) {
-    const remaining =
-      24 * 60 * 60 * 1000 - (now - last);
-
-    const hours = Math.ceil(
-      remaining / (60 * 60 * 1000)
-    );
-
     return safeReply(
       message,
-      `⏳ Tweet ödülü için yaklaşık **${hours} saat** beklemelisin.`
+      "❌ Kullanım: `.tweet mesaj`"
     );
   }
 
-  data.tweetCooldowns[message.author.id] = now;
+  const now =
+    Date.now();
 
-  addValue(message.author.id, 5);
+  const last =
+    Number(
+      data.tweetCooldowns[
+        message.author.id
+      ] || 0
+    );
 
-  const embed = new EmbedBuilder()
-    .setAuthor({
-      name: message.member?.displayName || message.author.username,
-      iconURL: message.author.displayAvatarURL()
-    })
-    .setDescription(text)
-    .setFooter({
-      text: "Axera League • Tweet"
-    })
-    .setTimestamp();
+  if (
+    now - last <
+    24 * 60 * 60 * 1000
+  ) {
+    return safeReply(
+      message,
+      "⏳ Tweet ödülünü 24 saatte bir alabilirsin."
+    );
+  }
+
+  data.tweetCooldowns[
+    message.author.id
+  ] = now;
+
+  addValue(
+    message.member,
+    5
+  );
+
+  const embed =
+    new EmbedBuilder()
+      .setAuthor({
+        name:
+          message.member.displayName,
+        iconURL:
+          message.author.displayAvatarURL()
+      })
+      .setDescription(text)
+      .setFooter({
+        text:
+          "Axera League • Tweet"
+      })
+      .setTimestamp();
 
   await safeDelete(message);
 
-  await safeSend(message.channel, {
-    embeds: [embed]
-  });
+  await safeSend(
+    message.channel,
+    {
+      embeds: [embed]
+    }
+  );
 
   saveData();
 }
 
 /* =========================================================
-   TAKIM SİSTEMİ
+   TAKIM
    ========================================================= */
 
-async function handleTeamAdd(message) {
-  if (!isCommentator(message.member)) {
-    return safeReply(message, "❌ Bu komut yalnızca Spiker/Yönetici içindir.");
+function ensureTeam(
+  roleId,
+  name
+) {
+  if (!data.teams[roleId]) {
+    data.teams[roleId] = {
+      name,
+      value: 0,
+      players: [],
+      points: 0,
+      goalsFor: 0,
+      goalsAgainst: 0,
+      wins: 0,
+      draws: 0,
+      losses: 0
+    };
   }
 
-  const role = message.mentions.roles.first();
+  return data.teams[roleId];
+}
+
+async function handleTeamAdd(
+  message
+) {
+  if (
+    !isCommentator(
+      message.member
+    )
+  ) {
+    return safeReply(
+      message,
+      "❌ Bu komut Spiker/Yönetici içindir."
+    );
+  }
+
+  const role =
+    message.mentions.roles.first();
 
   if (!role) {
     return safeReply(
@@ -949,12 +1241,20 @@ async function handleTeamAdd(message) {
   }
 
   if (data.teams[role.id]) {
-    return safeReply(message, "❌ Bu takım zaten sistemde bulunuyor.");
+    return safeReply(
+      message,
+      "❌ Bu takım zaten sistemde."
+    );
   }
 
-  ensureTeam(role.id, role.name);
+  ensureTeam(
+    role.id,
+    role.name
+  );
 
-  data.standings[role.id] = {
+  data.standings[
+    role.id
+  ] = {
     name: role.name,
     points: 0,
     goalsFor: 0,
@@ -968,16 +1268,26 @@ async function handleTeamAdd(message) {
 
   safeReply(
     message,
-    `✅ **${role.name}** Axera League'e eklendi.`
+    `✅ **${role.name}** takımı eklendi.`
   );
 }
 
-async function handleTeamRemove(message) {
-  if (!isCommentator(message.member)) {
-    return safeReply(message, "❌ Bu komut yalnızca Spiker/Yönetici içindir.");
+async function handleTeamRemove(
+  message
+) {
+  if (
+    !isCommentator(
+      message.member
+    )
+  ) {
+    return safeReply(
+      message,
+      "❌ Bu komut Spiker/Yönetici içindir."
+    );
   }
 
-  const role = message.mentions.roles.first();
+  const role =
+    message.mentions.roles.first();
 
   if (!role) {
     return safeReply(
@@ -986,29 +1296,44 @@ async function handleTeamRemove(message) {
     );
   }
 
-  const active = Object.values(data.activeMatches)
-    .some(match =>
-      match.team1 === role.id ||
-      match.team2 === role.id
+  const active =
+    Object.values(
+      data.activeMatches
+    ).some(
+      match =>
+        match.team1 === role.id ||
+        match.team2 === role.id
     );
 
   if (active) {
     return safeReply(
       message,
-      "❌ Bu takımın aktif maçı varken takım kaldırılamaz."
+      "❌ Aktif maçı olan takım kaldırılamaz."
     );
   }
 
-  delete data.teams[role.id];
-  delete data.standings[role.id];
-  delete data.formations[role.id];
-  delete data.cups[role.id];
+  delete data.teams[
+    role.id
+  ];
 
-  data.fixtures = data.fixtures.filter(
-    fixture =>
-      fixture.team1 !== role.id &&
-      fixture.team2 !== role.id
-  );
+  delete data.standings[
+    role.id
+  ];
+
+  delete data.formations[
+    role.id
+  ];
+
+  delete data.cups[
+    role.id
+  ];
+
+  data.fixtures =
+    data.fixtures.filter(
+      fixture =>
+        fixture.team1 !== role.id &&
+        fixture.team2 !== role.id
+    );
 
   saveData();
 
@@ -1018,41 +1343,61 @@ async function handleTeamRemove(message) {
   );
 }
 
-async function handleTeamValue(message, args) {
-  if (!isCommentator(message.member)) {
-    return safeReply(message, "❌ Bu komut Spiker/Yönetici içindir.");
+async function handleTeamValue(
+  message,
+  args
+) {
+  if (
+    !isCommentator(
+      message.member
+    )
+  ) {
+    return safeReply(
+      message,
+      "❌ Bu komut Spiker/Yönetici içindir."
+    );
   }
 
-  const role = message.mentions.roles.first();
+  const role =
+    message.mentions.roles.first();
 
-  if (!role) {
+  const amountArg =
+    args.find(
+      x =>
+        /^\d+(?:\.\d+)?M?€?$/i.test(x)
+    );
+
+  const amount =
+    parseMoney(amountArg);
+
+  if (!role || !amount) {
     return safeReply(
       message,
       "❌ Kullanım: `.takımdeğer @Takım 850M`"
     );
   }
 
-  const amountArg = args.find(x =>
-    /^\d+(?:\.\d+)?M?€?$/i.test(x)
-  );
-
-  const amount = parseMoney(amountArg);
-
-  if (!amount || amount > 1000) {
+  if (amount > 1000) {
     return safeReply(
       message,
-      "❌ Takım değeri 1-1000M€ arasında olmalıdır."
+      "❌ Takım değeri maksimum 1000M€."
     );
   }
 
-  const team = ensureTeam(role.id, role.name);
-  team.value = amount;
+  const team =
+    ensureTeam(
+      role.id,
+      role.name
+    );
+
+  team.value =
+    amount;
 
   saveData();
 
   safeReply(
     message,
-    `✅ **${role.name}** takım değeri **${formatMoney(amount)}** olarak ayarlandı.`
+    `✅ **${role.name}** takım değeri **${formatMoney(amount)}** oldu.`
   );
 }
 
@@ -1060,39 +1405,63 @@ async function handleTeamValue(message, args) {
    KADRO
    ========================================================= */
 
-async function handleSquadAdd(message, args) {
-  if (!isCommentator(message.member)) {
-    return safeReply(message, "❌ Bu komut Spiker/Yönetici içindir.");
+async function handleSquadAdd(
+  message,
+  args
+) {
+  if (
+    !isCommentator(
+      message.member
+    )
+  ) {
+    return safeReply(
+      message,
+      "❌ Bu komut Spiker/Yönetici içindir."
+    );
   }
 
-  const teamRole = message.mentions.roles.first();
-  const player = message.mentions.members.first();
+  const role =
+    message.mentions.roles.first();
 
-  if (!teamRole || !player) {
+  const player =
+    message.mentions.members.first();
+
+  if (!role || !player) {
     return safeReply(
       message,
       "❌ Kullanım: `.kadroekle @Takım @Oyuncu Pozisyon`"
     );
   }
 
-  const position = args
-    .filter(x => !/^<@&\d+>$/.test(x))
-    .filter(x => !/^<@!?\d+>$/.test(x))
-    .join(" ")
-    .trim();
+  const position =
+    args
+      .filter(
+        x => !/^<@&\d+>$/.test(x)
+      )
+      .filter(
+        x => !/^<@!?\d+>$/.test(x)
+      )
+      .join(" ")
+      .trim();
 
   if (!position) {
     return safeReply(
       message,
-      "❌ Pozisyon belirtmelisin."
+      "❌ Pozisyon yazmalısın."
     );
   }
 
-  const team = ensureTeam(teamRole.id, teamRole.name);
+  const team =
+    ensureTeam(
+      role.id,
+      role.name
+    );
 
-  team.players = team.players.filter(
-    p => p.userId !== player.id
-  );
+  team.players =
+    team.players.filter(
+      p =>
+        p.userId !== player.id
+    );
 
   team.players.push({
     userId: player.id,
@@ -1103,102 +1472,139 @@ async function handleSquadAdd(message, args) {
 
   safeReply(
     message,
-    `✅ ${player} **${teamRole.name}** kadrosuna **${position}** olarak eklendi.`
+    `✅ ${player} **${role.name}** kadrosuna **${position}** olarak eklendi.`
   );
 }
 
-async function handleSquadRemove(message) {
-  if (!isCommentator(message.member)) {
-    return safeReply(message, "❌ Bu komut Spiker/Yönetici içindir.");
+async function handleSquadRemove(
+  message
+) {
+  if (
+    !isCommentator(
+      message.member
+    )
+  ) {
+    return safeReply(
+      message,
+      "❌ Bu komut Spiker/Yönetici içindir."
+    );
   }
 
-  const teamRole = message.mentions.roles.first();
-  const player = message.mentions.members.first();
+  const role =
+    message.mentions.roles.first();
 
-  if (!teamRole || !player) {
+  const player =
+    message.mentions.members.first();
+
+  if (!role || !player) {
     return safeReply(
       message,
       "❌ Kullanım: `.kadrocikar @Takım @Oyuncu`"
     );
   }
 
-  const team = ensureTeam(teamRole.id, teamRole.name);
+  const team =
+    ensureTeam(
+      role.id,
+      role.name
+    );
 
-  team.players = team.players.filter(
-    p => p.userId !== player.id
-  );
+  team.players =
+    team.players.filter(
+      p =>
+        p.userId !== player.id
+    );
 
   saveData();
 
   safeReply(
     message,
-    `✅ ${player} **${teamRole.name}** kadrosundan çıkarıldı.`
+    `✅ ${player} kadrodan çıkarıldı.`
   );
 }
 
-async function handleSquad(message) {
-  const teamRole = message.mentions.roles.first();
+async function handleSquad(
+  message
+) {
+  const role =
+    message.mentions.roles.first();
 
-  if (!teamRole) {
+  if (!role) {
     return safeReply(
       message,
       "❌ Kullanım: `.kadro @Takım`"
     );
   }
 
-  const team = ensureTeam(teamRole.id, teamRole.name);
+  const team =
+    ensureTeam(
+      role.id,
+      role.name
+    );
 
   if (!team.players.length) {
     return safeReply(
       message,
-      `📋 **${teamRole.name}** kadrosunda kayıtlı oyuncu bulunmuyor.`
+      `📋 **${role.name}** kadrosu boş.`
     );
   }
 
   const groups = {};
 
-  for (const player of team.players) {
+  for (
+    const player
+    of team.players
+  ) {
     if (!groups[player.position]) {
       groups[player.position] = [];
     }
 
-    groups[player.position].push(player);
+    groups[player.position].push(
+      player
+    );
   }
 
   const lines = [];
 
-  for (const [position, players] of Object.entries(groups)) {
-    lines.push(`### ${position}`);
+  for (
+    const [position, players]
+    of Object.entries(groups)
+  ) {
+    lines.push(
+      `### ${position}`
+    );
 
-    for (const player of players) {
+    for (
+      const player
+      of players
+    ) {
       const member =
-        message.guild.members.cache.get(player.userId);
+        message.guild.members.cache.get(
+          player.userId
+        );
 
       if (!member) continue;
 
       lines.push(
-        `• ${member.displayName} — **${getDisplayValue(member)}**`
+        `• ${member.displayName} — **${formatMoney(
+          getValue(
+            member,
+            message.guild
+          )
+        )}**`
       );
     }
   }
 
-  const total = team.players.reduce((sum, p) => {
-    const member =
-      message.guild.members.cache.get(p.userId);
-
-    return sum + (member ? getValue(member.id) : 0);
-  }, 0);
-
   safeReply(
     message,
     [
-      `## ⚽ ${teamRole.name}`,
+      `## ⚽ ${role.name}`,
       "",
       lines.join("\n"),
       "",
       `👥 Oyuncu: **${team.players.length}**`,
-      `💰 Toplam oyuncu değeri: **${formatMoney(total)}**`,
-      `🏷️ Takım değeri: **${formatMoney(team.value)}**`
+      `💰 Takım değeri: **${formatMoney(team.value)}**`
     ].join("\n")
   );
 }
@@ -1207,77 +1613,114 @@ async function handleSquad(message) {
    FORMASYON
    ========================================================= */
 
-async function handleFormation(message) {
-  if (!isCommentator(message.member)) {
-    return safeReply(message, "❌ Bu komut Spiker/Yönetici içindir.");
+async function handleFormation(
+  message
+) {
+  if (
+    !isCommentator(
+      message.member
+    )
+  ) {
+    return safeReply(
+      message,
+      "❌ Bu komut Spiker/Yönetici içindir."
+    );
   }
 
-  const teamRole = message.mentions.roles.first();
+  const role =
+    message.mentions.roles.first();
 
-  if (!teamRole) {
+  if (!role) {
     return safeReply(
       message,
       "❌ Kullanım: `.formasyon @Takım`"
     );
   }
 
-  const menu = new StringSelectMenuBuilder()
-    .setCustomId(`formation_${teamRole.id}`)
-    .setPlaceholder("Formasyon seç")
-    .addOptions(
-      FORMATIONS.map(f => ({
-        label: f,
-        value: f
-      }))
-    );
+  const menu =
+    new StringSelectMenuBuilder()
+      .setCustomId(
+        `formation_${role.id}`
+      )
+      .setPlaceholder(
+        "Formasyon seç"
+      )
+      .addOptions(
+        FORMATIONS.map(
+          formation => ({
+            label: formation,
+            value: formation
+          })
+        )
+      );
 
-  const row = new ActionRowBuilder().addComponents(menu);
+  const row =
+    new ActionRowBuilder()
+      .addComponents(menu);
 
-  safeReply(message, {
-    content: `⚽ **${teamRole.name}** için formasyon seç:`,
-    components: [row]
-  });
+  safeReply(
+    message,
+    {
+      content:
+        `⚽ **${role.name}** formasyonu:`,
+      components: [row]
+    }
+  );
 }
 
 /* =========================================================
-   PUAN DURUMU
+   PUAN
    ========================================================= */
 
-async function handleStandings(message) {
-  const teams = Object.entries(data.standings);
+async function handleStandings(
+  message
+) {
+  const teams =
+    Object.values(
+      data.standings
+    );
 
   if (!teams.length) {
     return safeReply(
       message,
-      "📊 Henüz puan durumu oluşturulmadı."
+      "📊 Henüz puan durumu yok."
     );
   }
 
-  teams.sort((a, b) => {
-    const A = a[1];
-    const B = b[1];
+  teams.sort(
+    (a, b) => {
+      const gdA =
+        a.goalsFor -
+        a.goalsAgainst;
 
-    const gdA = A.goalsFor - A.goalsAgainst;
-    const gdB = B.goalsFor - B.goalsAgainst;
+      const gdB =
+        b.goalsFor -
+        b.goalsAgainst;
 
-    return (
-      B.points - A.points ||
-      gdB - gdA ||
-      B.goalsFor - A.goalsFor
+      return (
+        b.points - a.points ||
+        gdB - gdA ||
+        b.goalsFor -
+          a.goalsFor
+      );
+    }
+  );
+
+  const lines =
+    teams.map(
+      (team, index) => {
+        const gd =
+          team.goalsFor -
+          team.goalsAgainst;
+
+        return (
+          `**${index + 1}. ${team.name}** — ` +
+          `**${team.points} P** | ` +
+          `${team.wins}G ${team.draws}B ${team.losses}M | ` +
+          `AV ${gd >= 0 ? "+" : ""}${gd}`
+        );
+      }
     );
-  });
-
-  const lines = teams.map(([id, team], index) => {
-    const gd =
-      team.goalsFor - team.goalsAgainst;
-
-    return (
-      `**${index + 1}. ${team.name}** — ` +
-      `**${team.points} P** | ` +
-      `${team.wins}G ${team.draws}B ${team.losses}M | ` +
-      `AV ${gd >= 0 ? "+" : ""}${gd}`
-    );
-  });
 
   safeReply(
     message,
@@ -1285,28 +1728,51 @@ async function handleStandings(message) {
   );
 }
 
-async function handleAddPoints(message, args) {
-  if (!isCommentator(message.member)) {
-    return safeReply(message, "❌ Bu komut Spiker/Yönetici içindir.");
-  }
-
-  const role = message.mentions.roles.first();
-  const amount = Number(args.find(x => /^\d+$/.test(x)));
-
-  if (!role || !Number.isInteger(amount)) {
+async function handleAddPoints(
+  message,
+  args
+) {
+  if (
+    !isCommentator(
+      message.member
+    )
+  ) {
     return safeReply(
       message,
-      "❌ Kullanım: `.puanekle @Takım miktar`"
+      "❌ Bu komut Spiker/Yönetici içindir."
     );
   }
 
-  const standing = data.standings[role.id];
+  const role =
+    message.mentions.roles.first();
 
-  if (!standing) {
-    return safeReply(message, "❌ Bu takım puan sisteminde yok.");
+  const amount =
+    Number(
+      args.find(
+        x => /^\d+$/.test(x)
+      )
+    );
+
+  if (
+    !role ||
+    !Number.isInteger(amount)
+  ) {
+    return safeReply(
+      message,
+      "❌ Kullanım: `.puanekle @Takım 3`"
+    );
   }
 
-  standing.points += amount;
+  if (!data.standings[role.id]) {
+    return safeReply(
+      message,
+      "❌ Bu takım puan sisteminde yok."
+    );
+  }
+
+  data.standings[
+    role.id
+  ].points += amount;
 
   saveData();
 
@@ -1317,15 +1783,26 @@ async function handleAddPoints(message, args) {
 }
 
 /* =========================================================
-   KUPA / MÜZE
+   KUPA
    ========================================================= */
 
-async function handleCupAdd(message, args) {
-  if (!isCommentator(message.member)) {
-    return safeReply(message, "❌ Bu komut Spiker/Yönetici içindir.");
+async function handleCupAdd(
+  message,
+  args
+) {
+  if (
+    !isCommentator(
+      message.member
+    )
+  ) {
+    return safeReply(
+      message,
+      "❌ Bu komut Spiker/Yönetici içindir."
+    );
   }
 
-  const role = message.mentions.roles.first();
+  const role =
+    message.mentions.roles.first();
 
   if (!role) {
     return safeReply(
@@ -1334,20 +1811,28 @@ async function handleCupAdd(message, args) {
     );
   }
 
-  const name = args
-    .filter(x => !/^<@&\d+>$/.test(x))
-    .join(" ")
-    .trim();
+  const name =
+    args
+      .filter(
+        x => !/^<@&\d+>$/.test(x)
+      )
+      .join(" ")
+      .trim();
 
   if (!name) {
-    return safeReply(message, "❌ Kupa adı yazmalısın.");
+    return safeReply(
+      message,
+      "❌ Kupa adını yaz."
+    );
   }
 
   if (!data.cups[role.id]) {
     data.cups[role.id] = [];
   }
 
-  data.cups[role.id].push(name);
+  data.cups[
+    role.id
+  ].push(name);
 
   saveData();
 
@@ -1357,12 +1842,23 @@ async function handleCupAdd(message, args) {
   );
 }
 
-async function handleCupRemove(message, args) {
-  if (!isCommentator(message.member)) {
-    return safeReply(message, "❌ Bu komut Spiker/Yönetici içindir.");
+async function handleCupRemove(
+  message,
+  args
+) {
+  if (
+    !isCommentator(
+      message.member
+    )
+  ) {
+    return safeReply(
+      message,
+      "❌ Bu komut Spiker/Yönetici içindir."
+    );
   }
 
-  const role = message.mentions.roles.first();
+  const role =
+    message.mentions.roles.first();
 
   if (!role) {
     return safeReply(
@@ -1371,30 +1867,45 @@ async function handleCupRemove(message, args) {
     );
   }
 
-  const name = args
-    .filter(x => !/^<@&\d+>$/.test(x))
-    .join(" ")
-    .trim();
+  const name =
+    args
+      .filter(
+        x => !/^<@&\d+>$/.test(x)
+      )
+      .join(" ")
+      .trim();
 
   if (!data.cups[role.id]) {
-    return safeReply(message, "❌ Bu takımın kupası bulunmuyor.");
+    return safeReply(
+      message,
+      "❌ Kupa bulunamadı."
+    );
   }
 
-  data.cups[role.id] =
-    data.cups[role.id].filter(
-      cup => normalize(cup) !== normalize(name)
+  data.cups[
+    role.id
+  ] =
+    data.cups[
+      role.id
+    ].filter(
+      cup =>
+        normalize(cup) !==
+        normalize(name)
     );
 
   saveData();
 
   safeReply(
     message,
-    `✅ **${name}** kupa listesinden silindi.`
+    `✅ **${name}** kupası silindi.`
   );
 }
 
-async function handleMuseum(message) {
-  const role = message.mentions.roles.first();
+async function handleMuseum(
+  message
+) {
+  const role =
+    message.mentions.roles.first();
 
   if (!role) {
     return safeReply(
@@ -1403,478 +1914,369 @@ async function handleMuseum(message) {
     );
   }
 
-  const cups = data.cups[role.id] || [];
+  const cups =
+    data.cups[role.id] || [];
 
   if (!cups.length) {
     return safeReply(
       message,
-      `🏛️ **${role.name} Müzesi**\n\nHenüz kazanılmış kupa bulunmuyor.`
+      `🏛️ **${role.name} Müzesi**\n\nHenüz kupa yok.`
     );
   }
 
   safeReply(
     message,
     `🏛️ **${role.name} Müzesi**\n\n` +
-    cups.map((cup, i) => `${i + 1}. 🏆 ${cup}`).join("\n")
-  );
-}
-
-/* =========================================================
-   FİKSTÜR
-   ========================================================= */
-
-function parseFixtureDate(date, time) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
-  if (!/^\d{2}:\d{2}$/.test(time)) return null;
-
-  const [y, m, d] = date.split("-").map(Number);
-  const [h, min] = time.split(":").map(Number);
-
-  const result = new Date(y, m - 1, d, h, min, 0);
-
-  if (Number.isNaN(result.getTime())) return null;
-
-  return result;
-}
-
-async function handleFixtureAdd(message, args) {
-  if (!isCommentator(message.member)) {
-    return safeReply(message, "❌ Bu komut Spiker/Yönetici içindir.");
-  }
-
-  const roles = message.mentions.roles;
-
-  if (roles.size < 2) {
-    return safeReply(
-      message,
-      "❌ Kullanım: `.fiksturekle @Takım1 @Takım2 YYYY-MM-DD HH:MM`"
-    );
-  }
-
-  const teamRoles = [...roles.values()];
-
-  const dateArg = args.find(x =>
-    /^\d{4}-\d{2}-\d{2}$/.test(x)
-  );
-
-  const timeArg = args.find(x =>
-    /^\d{2}:\d{2}$/.test(x)
-  );
-
-  const date = parseFixtureDate(
-    dateArg,
-    timeArg
-  );
-
-  if (!date) {
-    return safeReply(
-      message,
-      "❌ Tarih formatı: `YYYY-MM-DD HH:MM`"
-    );
-  }
-
-  const fixture = {
-    id: data.nextFixtureId++,
-    team1: teamRoles[0].id,
-    team2: teamRoles[1].id,
-    timestamp: date.getTime(),
-    started: false
-  };
-
-  data.fixtures.push(fixture);
-
-  saveData();
-
-  safeReply(
-    message,
-    `✅ Fikstür eklendi:\n\n` +
-    `⚽ **${teamRoles[0].name}** vs **${teamRoles[1].name}**\n` +
-    `🕐 ${date.toLocaleString("tr-TR")}`
-  );
-}
-
-async function handleFixtures(message) {
-  const upcoming = data.fixtures
-    .filter(f => !f.started)
-    .sort((a, b) => a.timestamp - b.timestamp)
-    .slice(0, 20);
-
-  if (!upcoming.length) {
-    return safeReply(
-      message,
-      "📅 Bekleyen fikstür bulunmuyor."
-    );
-  }
-
-  const lines = upcoming.map(f => {
-    const t1 = message.guild.roles.cache.get(f.team1);
-    const t2 = message.guild.roles.cache.get(f.team2);
-
-    return (
-      `**#${f.id}** ` +
-      `${t1?.name || "Silinen takım"} 🆚 ${t2?.name || "Silinen takım"}\n` +
-      `🕐 ${new Date(f.timestamp).toLocaleString("tr-TR")}`
-    );
-  });
-
-  safeReply(
-    message,
-    `## 📅 Axera League Fikstür\n\n${lines.join("\n\n")}`
-  );
-}
-
-async function handleFixtureRemove(message) {
-  if (!isCommentator(message.member)) {
-    return safeReply(message, "❌ Bu komut Spiker/Yönetici içindir.");
-  }
-
-  const roles = [...message.mentions.roles.values()];
-
-  if (roles.length < 2) {
-    return safeReply(
-      message,
-      "❌ Kullanım: `.fiksturcikar @Takım1 @Takım2`"
-    );
-  }
-
-  const before = data.fixtures.length;
-
-  data.fixtures = data.fixtures.filter(
-    f =>
-      !(
-        (f.team1 === roles[0].id &&
-          f.team2 === roles[1].id) ||
-        (f.team1 === roles[1].id &&
-          f.team2 === roles[0].id)
+    cups
+      .map(
+        (cup, i) =>
+          `${i + 1}. 🏆 ${cup}`
       )
-  );
-
-  saveData();
-
-  safeReply(
-    message,
-    before === data.fixtures.length
-      ? "❌ Bu iki takım arasında fikstür bulunamadı."
-      : "✅ Fikstür silindi."
+      .join("\n")
   );
 }
 
 /* =========================================================
-   MAÇ MOTORU
+   MAÇ
    ========================================================= */
 
-function getTeamPlayers(guild, teamRoleId) {
+function getTeamPlayers(
+  guild,
+  roleId
+) {
+  const role =
+    guild.roles.cache.get(
+      roleId
+    );
+
+  if (!role) return [];
+
   const players = [];
 
-  const role = guild.roles.cache.get(teamRoleId);
-
-  if (!role) return players;
-
-  for (const member of role.members.values()) {
+  for (
+    const member
+    of role.members.values()
+  ) {
     if (member.user.bot) continue;
 
     players.push({
       userId: member.id,
       member,
-      position: getPositionFromNickname(member),
-      value: getValue(member.id)
+      position:
+        getPosition(member),
+      value:
+        getValue(
+          member,
+          guild
+        )
     });
   }
 
-  const team = data.teams[teamRoleId];
+  const team =
+    data.teams[roleId];
 
   if (team?.players) {
-    for (const stored of team.players) {
+    for (
+      const stored
+      of team.players
+    ) {
       if (
-        !players.some(
-          p => p.userId === stored.userId
+        players.some(
+          p =>
+            p.userId ===
+            stored.userId
         )
-      ) {
-        const member =
-          guild.members.cache.get(stored.userId);
+      ) continue;
 
-        if (member) {
-          players.push({
-            userId: member.id,
+      const member =
+        guild.members.cache.get(
+          stored.userId
+        );
+
+      if (!member) continue;
+
+      players.push({
+        userId: member.id,
+        member,
+        position:
+          stored.position,
+        value:
+          getValue(
             member,
-            position: stored.position,
-            value: getValue(member.id)
-          });
-        }
-      }
+            guild
+          )
+      });
     }
   }
 
   return players;
 }
 
-function pickScorer(players) {
-  if (!players.length) return null;
+function getPosition(
+  member
+) {
+  const parts =
+    member.displayName
+      .split("|")
+      .map(x => x.trim());
 
-  return randomItem(players);
+  return parts[2] || "OY";
 }
 
-function pickAssist(players, scorer) {
-  if (!players.length) return null;
+function randomItem(array) {
+  if (!array.length) return null;
 
-  const possible = players.filter(
-    p => p.userId !== scorer?.userId
-  );
-
-  return randomItem(
-    possible.length ? possible : players
-  );
-}
-
-function matchCommentary(team1, team2, scorer = null) {
-  const t1 = team1.name;
-  const t2 = team2.name;
-
-  const generic = [
-    `⚽ ${t1} topu rakip yarı alana taşıyor.`,
-    `🎯 ${t2} savunması pozisyonunu koruyor.`,
-    `🔥 Orta sahada sert bir mücadele var.`,
-    `🏃 Hızlı bir kanat atağı gelişiyor.`,
-    `🧤 Kaleci topu kontrol etti.`,
-    `📣 Tribünlerden büyük destek geliyor.`,
-    `🎯 Ceza sahasına tehlikeli bir orta gönderildi.`,
-    `🛡️ Savunma son anda araya girdi.`,
-    `⚡ Kontra atak fırsatı oluştu.`,
-    `👟 Orta sahada başarılı bir paslaşma var.`,
-    `🚨 Tehlikeli bir şut geldi.`,
-    `🧤 Kaleci başarılı bir kurtarış yaptı.`
+  return array[
+    Math.floor(
+      Math.random() *
+      array.length
+    )
   ];
+}
 
+function commentary(
+  team1,
+  team2,
+  scorer
+) {
   if (scorer) {
     return `⚽ **GOOOL!** ${scorer.member.displayName} fileleri havalandırdı!`;
   }
 
-  return randomItem(generic);
+  return randomItem([
+    `⚡ ${team1.name} hızlı hücuma çıktı.`,
+    `🎯 ${team2.name} savunması araya girdi.`,
+    `🧤 Kaleci topu kontrol etti.`,
+    `🔥 Orta sahada sert mücadele.`,
+    `🏃 Kanattan tehlikeli atak.`,
+    `🎯 Ceza sahasına orta açıldı.`,
+    `🛡️ Savunma başarılı şekilde uzaklaştırdı.`,
+    `🚨 Tehlikeli şut!`,
+    `⚽ Top orta sahada dolaşıyor.`
+  ]);
 }
 
-async function startMatch(guild, team1RoleId, team2RoleId) {
-  const role1 = guild.roles.cache.get(team1RoleId);
-  const role2 = guild.roles.cache.get(team2RoleId);
+async function startMatch(
+  guild,
+  team1Id,
+  team2Id
+) {
+  const role1 =
+    guild.roles.cache.get(
+      team1Id
+    );
+
+  const role2 =
+    guild.roles.cache.get(
+      team2Id
+    );
 
   if (!role1 || !role2) return;
 
-  const players1 = getTeamPlayers(guild, team1RoleId);
-  const players2 = getTeamPlayers(guild, team2RoleId);
+  const players1 =
+    getTeamPlayers(
+      guild,
+      team1Id
+    );
 
-  const team1 = {
-    id: team1RoleId,
-    name: role1.name,
-    players: players1,
-    goals: 0
-  };
-
-  const team2 = {
-    id: team2RoleId,
-    name: role2.name,
-    players: players2,
-    goals: 0
-  };
-
-  const channel =
-    guild.channels.cache.get(IDS.channels.match);
-
-  if (!channel) return;
+  const players2 =
+    getTeamPlayers(
+      guild,
+      team2Id
+    );
 
   const matchId =
-    `${team1RoleId}_${team2RoleId}_${Date.now()}`;
+    `${team1Id}_${team2Id}_${Date.now()}`;
 
   const match = {
     id: matchId,
-    team1: team1RoleId,
-    team2: team2RoleId,
+    team1: team1Id,
+    team2: team2Id,
     minute: 0,
     team1Goals: 0,
     team2Goals: 0,
-    lastCommentary: "Maç başladı!",
-    finished: false,
-    interval: null,
     messageId: null,
-    rewarded: false
+    finished: false
   };
 
-  data.activeMatches[matchId] = {
-    ...match,
-    interval: undefined
-  };
+  data.activeMatches[
+    matchId
+  ] = match;
 
-  const embed = new EmbedBuilder()
-    .setTitle(`⚽ ${team1.name} 🆚 ${team2.name}`)
-    .setDescription(
-      `⏱️ **0'**\n\n` +
-      `**${team1.name}** 0 — 0 **${team2.name}**\n\n` +
-      `🎙️ ${team1.name} maça başladı.`
-    )
-    .setFooter({
-      text: "Axera League • Canlı Maç"
-    })
-    .setTimestamp();
+  const channel =
+    guild.channels.cache.get(
+      IDS.channels.match
+    );
 
-  const sent = await safeSend(channel, {
-    embeds: [embed]
-  });
+  if (!channel) return;
+
+  const embed =
+    new EmbedBuilder()
+      .setTitle(
+        `⚽ ${role1.name} 🆚 ${role2.name}`
+      )
+      .setDescription(
+        `⏱️ **0'**\n\n` +
+        `## 0 — 0\n\n` +
+        `🎙️ Maç başladı!`
+      )
+      .setTimestamp();
+
+  const sent =
+    await safeSend(
+      channel,
+      {
+        embeds: [embed]
+      }
+    );
 
   if (!sent) {
-    delete data.activeMatches[matchId];
+    delete data.activeMatches[
+      matchId
+    ];
+
     return;
   }
 
-  match.messageId = sent.id;
-  data.activeMatches[matchId].messageId = sent.id;
+  match.messageId =
+    sent.id;
 
   saveData();
 
   let minute = 0;
 
-  const interval = setInterval(async () => {
-    try {
-      minute++;
-
-      if (!data.activeMatches[matchId]) {
-        clearInterval(interval);
-        return;
-      }
-
-      const chance = Math.random();
-
-      let scorer = null;
-      let scoringTeam = null;
-
-      if (chance < 0.055 && players1.length) {
-        scorer = pickScorer(players1);
-        scoringTeam = 1;
-      } else if (
-        chance < 0.105 &&
-        players2.length
-      ) {
-        scorer = pickScorer(players2);
-        scoringTeam = 2;
-      }
-
-      if (scoringTeam === 1) {
-        team1.goals++;
-        match.team1Goals++;
-      }
-
-      if (scoringTeam === 2) {
-        team2.goals++;
-        match.team2Goals++;
-      }
-
-      let commentary;
-
-      if (scorer) {
-        commentary = matchCommentary(
-          team1,
-          team2,
-          scorer
-        );
-
-        const scorerStats =
-          ensureStats(scorer.userId);
-
-        scorerStats.goals++;
-        addValue(scorer.userId, 2);
-
-        const assistPlayers =
-          scoringTeam === 1
-            ? players1
-            : players2;
-
-        const assist = pickAssist(
-          assistPlayers,
-          scorer
-        );
-
-        if (
-          assist &&
-          assist.userId !== scorer.userId
-        ) {
-          ensureStats(assist.userId).assists++;
-          addValue(assist.userId, 1);
-        }
-      } else {
-        commentary = matchCommentary(
-          team1,
-          team2
-        );
-      }
-
-      match.minute = minute;
-      match.lastCommentary = commentary;
-
-      const embed = new EmbedBuilder()
-        .setTitle(
-          `⚽ ${team1.name} 🆚 ${team2.name}`
-        )
-        .setDescription(
-          `⏱️ **${minute}'**\n\n` +
-          `## ${team1.goals} — ${team2.goals}\n\n` +
-          `🎙️ ${commentary}`
-        )
-        .addFields(
-          {
-            name: team1.name,
-            value: `👥 ${players1.length} oyuncu`,
-            inline: true
-          },
-          {
-            name: team2.name,
-            value: `👥 ${players2.length} oyuncu`,
-            inline: true
+  const interval =
+    setInterval(
+      async () => {
+        try {
+          if (
+            !data.activeMatches[
+              matchId
+            ]
+          ) {
+            clearInterval(interval);
+            return;
           }
-        )
-        .setFooter({
-          text: "Axera League • Canlı Maç"
-        })
-        .setTimestamp();
 
-      const msg = await channel.messages
-        .fetch(match.messageId)
-        .catch(() => null);
+          minute++;
 
-      if (msg) {
-        await msg.edit({
-          embeds: [embed]
-        }).catch(() => {});
-      }
+          let scorer = null;
+          let scoringTeam = 0;
 
-      if (minute >= 90) {
-        clearInterval(interval);
+          const chance =
+            Math.random();
 
-        await finishMatch(
-          guild,
-          match,
-          team1,
-          team2,
-          players1,
-          players2
-        );
-      }
-    } catch (error) {
-      console.error("Maç motoru hatası:", error);
+          if (
+            chance < 0.055 &&
+            players1.length
+          ) {
+            scorer =
+              randomItem(
+                players1
+              );
 
-      clearInterval(interval);
+            scoringTeam = 1;
+          } else if (
+            chance < 0.105 &&
+            players2.length
+          ) {
+            scorer =
+              randomItem(
+                players2
+              );
 
-      if (data.activeMatches[matchId]) {
-        delete data.activeMatches[matchId];
-        saveData();
-      }
-    }
-  }, 3000);
+            scoringTeam = 2;
+          }
 
-  data.activeMatches[matchId].interval = interval;
+          if (scoringTeam === 1) {
+            match.team1Goals++;
+          }
+
+          if (scoringTeam === 2) {
+            match.team2Goals++;
+          }
+
+          if (scorer) {
+            addValue(
+              scorer.member,
+              2
+            );
+
+            ensureStats(
+              scorer.userId
+            ).goals++;
+          }
+
+          match.minute =
+            minute;
+
+          const embed =
+            new EmbedBuilder()
+              .setTitle(
+                `⚽ ${role1.name} 🆚 ${role2.name}`
+              )
+              .setDescription(
+                `⏱️ **${minute}'**\n\n` +
+                `## ${match.team1Goals} — ${match.team2Goals}\n\n` +
+                `🎙️ ${commentary(
+                  role1,
+                  role2,
+                  scorer
+                )}`
+              )
+              .setTimestamp();
+
+          const msg =
+            await channel.messages
+              .fetch(
+                match.messageId
+              )
+              .catch(
+                () => null
+              );
+
+          if (msg) {
+            await msg.edit({
+              embeds: [embed]
+            }).catch(() => {});
+          }
+
+          if (minute >= 90) {
+            clearInterval(
+              interval
+            );
+
+            await finishMatch(
+              guild,
+              match,
+              players1,
+              players2
+            );
+          }
+        } catch (error) {
+          console.error(
+            "MAÇ HATASI:",
+            error
+          );
+
+          clearInterval(
+            interval
+          );
+
+          delete data.activeMatches[
+            matchId
+          ];
+
+          saveData();
+        }
+      },
+      3000
+    );
 }
 
 async function finishMatch(
   guild,
   match,
-  team1,
-  team2,
   players1,
   players2
 ) {
@@ -1882,173 +2284,177 @@ async function finishMatch(
 
   match.finished = true;
 
-  const winner =
-    match.team1Goals > match.team2Goals
-      ? 1
-      : match.team2Goals > match.team1Goals
-        ? 2
-        : 0;
-
   const s1 =
-    data.standings[team1.id] ||
-    {
-      name: team1.name,
-      points: 0,
-      goalsFor: 0,
-      goalsAgainst: 0,
-      wins: 0,
-      draws: 0,
-      losses: 0
-    };
+    data.standings[
+      match.team1
+    ];
 
   const s2 =
-    data.standings[team2.id] ||
-    {
-      name: team2.name,
-      points: 0,
-      goalsFor: 0,
-      goalsAgainst: 0,
-      wins: 0,
-      draws: 0,
-      losses: 0
-    };
+    data.standings[
+      match.team2
+    ];
 
-  s1.goalsFor += match.team1Goals;
-  s1.goalsAgainst += match.team2Goals;
+  if (s1 && s2) {
+    s1.goalsFor +=
+      match.team1Goals;
 
-  s2.goalsFor += match.team2Goals;
-  s2.goalsAgainst += match.team1Goals;
+    s1.goalsAgainst +=
+      match.team2Goals;
 
-  if (winner === 1) {
-    s1.points += 3;
-    s1.wins++;
-    s2.losses++;
-  } else if (winner === 2) {
-    s2.points += 3;
-    s2.wins++;
-    s1.losses++;
-  } else {
-    s1.points++;
-    s2.points++;
-    s1.draws++;
-    s2.draws++;
+    s2.goalsFor +=
+      match.team2Goals;
+
+    s2.goalsAgainst +=
+      match.team1Goals;
+
+    if (
+      match.team1Goals >
+      match.team2Goals
+    ) {
+      s1.points += 3;
+      s1.wins++;
+      s2.losses++;
+    } else if (
+      match.team2Goals >
+      match.team1Goals
+    ) {
+      s2.points += 3;
+      s2.wins++;
+      s1.losses++;
+    } else {
+      s1.points++;
+      s2.points++;
+      s1.draws++;
+      s2.draws++;
+    }
   }
 
-  data.standings[team1.id] = s1;
-  data.standings[team2.id] = s2;
-
-  const allPlayers = [
+  const players = [
     ...players1,
     ...players2
   ];
 
-  for (const player of allPlayers) {
-    if (!data.matchRewards[match.id]) {
-      data.matchRewards[match.id] = {};
-    }
+  if (!data.matchRewards[
+    match.id
+  ]) {
+    data.matchRewards[
+      match.id
+    ] = {};
+  }
 
+  for (
+    const player
+    of players
+  ) {
     if (
-      !data.matchRewards[match.id][player.userId]
-    ) {
-      addValue(player.userId, 5);
-      ensureStats(player.userId).matches++;
+      data.matchRewards[
+        match.id
+      ][player.userId]
+    ) continue;
 
-      data.matchRewards[match.id][player.userId] = true;
-    }
+    addValue(
+      player.member,
+      5
+    );
+
+    ensureStats(
+      player.userId
+    ).matches++;
+
+    data.matchRewards[
+      match.id
+    ][player.userId] = true;
   }
 
   const channel =
-    guild.channels.cache.get(IDS.channels.match);
+    guild.channels.cache.get(
+      IDS.channels.match
+    );
 
-  if (channel && match.messageId) {
-    const msg = await channel.messages
-      .fetch(match.messageId)
-      .catch(() => null);
+  if (
+    channel &&
+    match.messageId
+  ) {
+    const msg =
+      await channel.messages
+        .fetch(
+          match.messageId
+        )
+        .catch(
+          () => null
+        );
 
     if (msg) {
       const result =
-        winner === 0
-          ? "🤝 **MAÇ BERABERE!**"
-          : winner === 1
-            ? `🏆 **${team1.name} KAZANDI!**`
-            : `🏆 **${team2.name} KAZANDI!**`;
-
-      const embed = new EmbedBuilder()
-        .setTitle(
-          `🏁 ${team1.name} ${match.team1Goals} — ${match.team2Goals} ${team2.name}`
-        )
-        .setDescription(
-          `${result}\n\n` +
-          `🎁 Maça katılan oyunculara **+5M€** ödül verildi.\n` +
-          `⚽ Gol: **+2M€**\n` +
-          `🎯 Asist: **+1M€**`
-        )
-        .setFooter({
-          text: "Axera League • Maç Sonucu"
-        })
-        .setTimestamp();
+        match.team1Goals >
+        match.team2Goals
+          ? "🏆 Takım 1 kazandı!"
+          : match.team2Goals >
+              match.team1Goals
+            ? "🏆 Takım 2 kazandı!"
+            : "🤝 Maç berabere!";
 
       await msg.edit({
-        embeds: [embed]
+        embeds: [
+          new EmbedBuilder()
+            .setTitle(
+              `🏁 ${match.team1Goals} — ${match.team2Goals}`
+            )
+            .setDescription(
+              `${result}\n\n` +
+              "💰 Katılan oyuncular: **+5M€**\n" +
+              "⚽ Gol: **+2M€**"
+            )
+            .setTimestamp()
+        ]
       }).catch(() => {});
     }
   }
 
   data.matchHistory.push({
     id: match.id,
-    team1: team1.id,
-    team2: team2.id,
+    team1: match.team1,
+    team2: match.team2,
     score1: match.team1Goals,
     score2: match.team2Goals,
     timestamp: Date.now()
   });
 
-  delete data.activeMatches[match.id];
+  delete data.activeMatches[
+    match.id
+  ];
 
   saveData();
 }
 
-/* =========================================================
-   .MAÇ
-   ========================================================= */
+async function handleMatch(
+  message
+) {
+  if (
+    !onlyChannel(
+      message,
+      IDS.channels.match
+    )
+  ) return;
 
-async function handleMatch(message) {
-  if (!onlyChannel(message, IDS.channels.match)) return;
-
-  if (!isCommentator(message.member)) {
+  if (
+    !isCommentator(
+      message.member
+    )
+  ) {
     return safeReply(
       message,
-      "❌ Bu komutu yalnızca **Spiker** veya **Yönetici** kullanabilir."
+      "❌ Bu komut Spiker/Yönetici içindir."
     );
   }
 
-  const roles = [...message.mentions.roles.values()];
+  const roles =
+    [...message.mentions.roles.values()];
 
   if (roles.length < 2) {
     return safeReply(
       message,
       "❌ Kullanım: `.maç @Takım1 @Takım2`"
-    );
-  }
-
-  const alreadyActive =
-    Object.values(data.activeMatches)
-      .some(
-        m =>
-          (
-            m.team1 === roles[0].id &&
-            m.team2 === roles[1].id
-          ) ||
-          (
-            m.team1 === roles[1].id &&
-            m.team2 === roles[0].id
-          )
-      );
-
-  if (alreadyActive) {
-    return safeReply(
-      message,
-      "❌ Bu takımların zaten aktif bir maçı var."
     );
   }
 
@@ -2060,208 +2466,565 @@ async function handleMatch(message) {
 }
 
 /* =========================================================
-   ROL PANELİ
+   FİKSTÜR
    ========================================================= */
 
-async function handleRolePanel(message) {
-  if (!isAdmin(message.member)) {
+function parseFixtureDate(
+  date,
+  time
+) {
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(
+      date || ""
+    )
+  ) return null;
+
+  if (
+    !/^\d{2}:\d{2}$/.test(
+      time || ""
+    )
+  ) return null;
+
+  const [
+    year,
+    month,
+    day
+  ] = date
+    .split("-")
+    .map(Number);
+
+  const [
+    hour,
+    minute
+  ] = time
+    .split(":")
+    .map(Number);
+
+  const result =
+    new Date(
+      year,
+      month - 1,
+      day,
+      hour,
+      minute,
+      0
+    );
+
+  return Number.isNaN(
+    result.getTime()
+  )
+    ? null
+    : result;
+}
+
+async function handleFixtureAdd(
+  message,
+  args
+) {
+  if (
+    !isCommentator(
+      message.member
+    )
+  ) {
     return safeReply(
       message,
-      "❌ Bu paneli yalnızca Yönetici oluşturabilir."
+      "❌ Bu komut Spiker/Yönetici içindir."
     );
   }
 
-  const embed = new EmbedBuilder()
-    .setTitle("🎭 Axera League Rol Paneli")
-    .setDescription(
-      "İlgilendiğin bildirim rollerini aşağıdaki butonlardan açıp kapatabilirsin."
-    )
-    .setTimestamp();
+  const roles =
+    [...message.mentions.roles.values()];
 
-  const row1 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("ping_partner")
-      .setLabel("Partner Ping")
-      .setEmoji("🤝")
-      .setStyle(ButtonStyle.Secondary),
+  const date =
+    args.find(
+      x =>
+        /^\d{4}-\d{2}-\d{2}$/.test(x)
+    );
 
-    new ButtonBuilder()
-      .setCustomId("ping_match")
-      .setLabel("Maç Ping")
-      .setEmoji("⚽")
-      .setStyle(ButtonStyle.Primary),
+  const time =
+    args.find(
+      x =>
+        /^\d{2}:\d{2}$/.test(x)
+    );
 
-    new ButtonBuilder()
-      .setCustomId("ping_announcement")
-      .setLabel("Duyuru Ping")
-      .setEmoji("📢")
-      .setStyle(ButtonStyle.Success)
-  );
+  if (
+    roles.length < 2 ||
+    !date ||
+    !time
+  ) {
+    return safeReply(
+      message,
+      "❌ `.fiksturekle @Takım1 @Takım2 YYYY-MM-DD HH:MM`"
+    );
+  }
 
-  const row2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("ping_giveaway")
-      .setLabel("Çekiliş Ping")
-      .setEmoji("🎉")
-      .setStyle(ButtonStyle.Secondary),
+  const timestamp =
+    parseFixtureDate(
+      date,
+      time
+    );
 
-    new ButtonBuilder()
-      .setCustomId("ping_media")
-      .setLabel("Medya Ping")
-      .setEmoji("📰")
-      .setStyle(ButtonStyle.Primary)
-  );
+  if (!timestamp) {
+    return safeReply(
+      message,
+      "❌ Geçersiz tarih."
+    );
+  }
 
-  safeSend(message.channel, {
-    embeds: [embed],
-    components: [row1, row2]
+  data.fixtures.push({
+    id:
+      data.nextFixtureId++,
+    team1: roles[0].id,
+    team2: roles[1].id,
+    timestamp:
+      timestamp.getTime(),
+    started: false
   });
+
+  saveData();
+
+  safeReply(
+    message,
+    `✅ Fikstür eklendi:\n⚽ **${roles[0].name}** 🆚 **${roles[1].name}**\n🕐 ${timestamp.toLocaleString("tr-TR")}`
+  );
+}
+
+async function handleFixtures(
+  message
+) {
+  const fixtures =
+    data.fixtures
+      .filter(
+        f => !f.started
+      )
+      .sort(
+        (a, b) =>
+          a.timestamp -
+          b.timestamp
+      );
+
+  if (!fixtures.length) {
+    return safeReply(
+      message,
+      "📅 Bekleyen fikstür yok."
+    );
+  }
+
+  const lines =
+    fixtures
+      .slice(0, 20)
+      .map(
+        fixture => {
+          const team1 =
+            message.guild.roles.cache.get(
+              fixture.team1
+            );
+
+          const team2 =
+            message.guild.roles.cache.get(
+              fixture.team2
+            );
+
+          return (
+            `**#${fixture.id}** ${team1?.name || "Takım"} 🆚 ${team2?.name || "Takım"}\n` +
+            `🕐 ${new Date(
+              fixture.timestamp
+            ).toLocaleString("tr-TR")}`
+          );
+        }
+      );
+
+  safeReply(
+    message,
+    `## 📅 Fikstür\n\n${lines.join("\n\n")}`
+  );
+}
+
+async function handleFixtureRemove(
+  message
+) {
+  if (
+    !isCommentator(
+      message.member
+    )
+  ) {
+    return safeReply(
+      message,
+      "❌ Bu komut Spiker/Yönetici içindir."
+    );
+  }
+
+  const roles =
+    [...message.mentions.roles.values()];
+
+  if (roles.length < 2) {
+    return safeReply(
+      message,
+      "❌ Kullanım: `.fiksturcikar @Takım1 @Takım2`"
+    );
+  }
+
+  const before =
+    data.fixtures.length;
+
+  data.fixtures =
+    data.fixtures.filter(
+      f =>
+        !(
+          (
+            f.team1 === roles[0].id &&
+            f.team2 === roles[1].id
+          ) ||
+          (
+            f.team1 === roles[1].id &&
+            f.team2 === roles[0].id
+          )
+        )
+    );
+
+  saveData();
+
+  safeReply(
+    message,
+    before ===
+      data.fixtures.length
+      ? "❌ Fikstür bulunamadı."
+      : "✅ Fikstür silindi."
+  );
 }
 
 /* =========================================================
    TICKET
    ========================================================= */
 
-async function handleTicketPanel(message) {
+async function handleTicketPanel(
+  message
+) {
   if (!isAdmin(message.member)) {
     return safeReply(
       message,
-      "❌ Ticket panelini yalnızca Yönetici oluşturabilir."
+      "❌ Ticket paneli Yönetici içindir."
     );
   }
 
-  const embed = new EmbedBuilder()
-    .setTitle("🎫 Axera League Destek")
-    .setDescription(
-      "Destek almak için aşağıdaki butona basarak özel bir ticket oluşturabilirsin."
-    )
-    .setTimestamp();
+  const embed =
+    new EmbedBuilder()
+      .setTitle(
+        "🎫 Axera League Destek"
+      )
+      .setDescription(
+        "Destek almak için aşağıdaki butona bas."
+      )
+      .setTimestamp();
 
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("create_ticket")
-      .setLabel("Destek Talebi Oluştur")
-      .setEmoji("🎫")
-      .setStyle(ButtonStyle.Primary)
+  const row =
+    new ActionRowBuilder()
+      .addComponents(
+        new ButtonBuilder()
+          .setCustomId(
+            "create_ticket"
+          )
+          .setLabel(
+            "Destek Talebi Oluştur"
+          )
+          .setEmoji("🎫")
+          .setStyle(
+            ButtonStyle.Primary
+          )
+      );
+
+  safeSend(
+    message.channel,
+    {
+      embeds: [embed],
+      components: [row]
+    }
   );
-
-  safeSend(message.channel, {
-    embeds: [embed],
-    components: [row]
-  });
 }
 
-async function createTicket(interaction) {
-  const guild = interaction.guild;
+async function createTicket(
+  interaction
+) {
+  const guild =
+    interaction.guild;
 
-  const existing = Object.values(data.tickets)
-    .find(t => t.userId === interaction.user.id && t.open);
+  const existing =
+    Object.values(
+      data.tickets
+    ).find(
+      t =>
+        t.userId ===
+          interaction.user.id &&
+        t.open
+    );
 
   if (existing) {
     return interaction.reply({
-      content: `❌ Zaten açık bir ticketın var: <#${existing.channelId}>`,
+      content:
+        `❌ Zaten açık ticketın var: <#${existing.channelId}>`,
       ephemeral: true
     });
   }
 
-  const channel = await guild.channels.create({
-    name: `ticket-${interaction.user.username}`
-      .toLowerCase()
-      .replace(/[^a-z0-9-]/g, "")
-      .substring(0, 90),
-    type: ChannelType.GuildText,
-    permissionOverwrites: [
-      {
-        id: guild.roles.everyone.id,
-        deny: [PermissionsBitField.Flags.ViewChannel]
-      },
-      {
-        id: interaction.user.id,
-        allow: [
-          PermissionsBitField.Flags.ViewChannel,
-          PermissionsBitField.Flags.SendMessages,
-          PermissionsBitField.Flags.ReadMessageHistory
-        ]
-      },
-      {
-        id: IDS.roles.moderator,
-        allow: [
-          PermissionsBitField.Flags.ViewChannel,
-          PermissionsBitField.Flags.SendMessages,
-          PermissionsBitField.Flags.ReadMessageHistory
-        ]
-      }
-    ]
-  });
+  const channel =
+    await guild.channels.create({
+      name:
+        `ticket-${interaction.user.username}`
+          .toLowerCase()
+          .replace(
+            /[^a-z0-9-]/g,
+            ""
+          )
+          .substring(0, 80),
 
-  data.tickets[channel.id] = {
-    userId: interaction.user.id,
-    channelId: channel.id,
+      type:
+        ChannelType.GuildText,
+
+      permissionOverwrites: [
+        {
+          id:
+            guild.roles.everyone.id,
+          deny: [
+            PermissionsBitField.Flags.ViewChannel
+          ]
+        },
+
+        {
+          id:
+            interaction.user.id,
+          allow: [
+            PermissionsBitField.Flags.ViewChannel,
+            PermissionsBitField.Flags.SendMessages,
+            PermissionsBitField.Flags.ReadMessageHistory
+          ]
+        },
+
+        {
+          id:
+            IDS.roles.moderator,
+          allow: [
+            PermissionsBitField.Flags.ViewChannel,
+            PermissionsBitField.Flags.SendMessages,
+            PermissionsBitField.Flags.ReadMessageHistory
+          ]
+        }
+      ]
+    });
+
+  data.tickets[
+    channel.id
+  ] = {
+    userId:
+      interaction.user.id,
+    channelId:
+      channel.id,
     open: true,
-    lastMessage: Date.now()
+    lastMessage:
+      Date.now()
   };
 
   saveData();
 
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("close_ticket")
-      .setLabel("Bileti Kapat")
-      .setEmoji("🔒")
-      .setStyle(ButtonStyle.Danger)
+  const row =
+    new ActionRowBuilder()
+      .addComponents(
+        new ButtonBuilder()
+          .setCustomId(
+            "close_ticket"
+          )
+          .setLabel(
+            "Bileti Kapat"
+          )
+          .setEmoji("🔒")
+          .setStyle(
+            ButtonStyle.Danger
+          )
+      );
+
+  await safeSend(
+    channel,
+    {
+      content:
+        `${interaction.user} hoş geldin!`,
+      components: [row]
+    }
   );
 
-  await safeSend(channel, {
-    content: `${interaction.user} hoş geldin! Destek ekibi birazdan seninle ilgilenecek.`,
-    components: [row]
-  });
-
-  await interaction.reply({
-    content: `✅ Ticket oluşturuldu: ${channel}`,
+  interaction.reply({
+    content:
+      `✅ Ticket oluşturuldu: ${channel}`,
     ephemeral: true
   });
 }
 
-async function closeTicket(interaction) {
-  const ticket = data.tickets[interaction.channel.id];
+async function closeTicket(
+  interaction
+) {
+  const ticket =
+    data.tickets[
+      interaction.channel.id
+    ];
 
   if (!ticket) {
     return interaction.reply({
-      content: "❌ Bu kanal bir ticket değil.",
+      content:
+        "❌ Bu kanal ticket değil.",
       ephemeral: true
     });
   }
 
   if (
-    interaction.user.id !== ticket.userId &&
-    !isModerator(interaction.member)
+    interaction.user.id !==
+      ticket.userId &&
+    !isModerator(
+      interaction.member
+    )
   ) {
     return interaction.reply({
-      content: "❌ Bu ticketı kapatma yetkin yok.",
+      content:
+        "❌ Bu ticketı kapatma yetkin yok.",
       ephemeral: true
     });
   }
 
   ticket.open = false;
+
   saveData();
 
-  await interaction.reply("🔒 Ticket kapatılıyor...");
+  await interaction.reply(
+    "🔒 Ticket kapatılıyor..."
+  );
 
-  setTimeout(async () => {
-    await interaction.channel.delete().catch(() => {});
-  }, 2000);
+  setTimeout(
+    () =>
+      interaction.channel
+        .delete()
+        .catch(() => {}),
+    2000
+  );
+}
+
+/* =========================================================
+   ROL PANELİ
+   ========================================================= */
+
+async function handleRolePanel(
+  message
+) {
+  if (!isAdmin(message.member)) {
+    return safeReply(
+      message,
+      "❌ Rol paneli Yönetici içindir."
+    );
+  }
+
+  const embed =
+    new EmbedBuilder()
+      .setTitle(
+        "🎭 Axera League Rol Paneli"
+      )
+      .setDescription(
+        "İstediğin bildirim rollerini açıp kapatabilirsin."
+      )
+      .setTimestamp();
+
+  const row1 =
+    new ActionRowBuilder()
+      .addComponents(
+        new ButtonBuilder()
+          .setCustomId(
+            "ping_partner"
+          )
+          .setLabel(
+            "Partner Ping"
+          )
+          .setEmoji("🤝")
+          .setStyle(
+            ButtonStyle.Secondary
+          ),
+
+        new ButtonBuilder()
+          .setCustomId(
+            "ping_match"
+          )
+          .setLabel(
+            "Maç Ping"
+          )
+          .setEmoji("⚽")
+          .setStyle(
+            ButtonStyle.Primary
+          ),
+
+        new ButtonBuilder()
+          .setCustomId(
+            "ping_announcement"
+          )
+          .setLabel(
+            "Duyuru Ping"
+          )
+          .setEmoji("📢")
+          .setStyle(
+            ButtonStyle.Success
+          )
+      );
+
+  const row2 =
+    new ActionRowBuilder()
+      .addComponents(
+        new ButtonBuilder()
+          .setCustomId(
+            "ping_giveaway"
+          )
+          .setLabel(
+            "Çekiliş Ping"
+          )
+          .setEmoji("🎉")
+          .setStyle(
+            ButtonStyle.Secondary
+          ),
+
+        new ButtonBuilder()
+          .setCustomId(
+            "ping_media"
+          )
+          .setLabel(
+            "Medya Ping"
+          )
+          .setEmoji("📰")
+          .setStyle(
+            ButtonStyle.Primary
+          )
+      );
+
+  safeSend(
+    message.channel,
+    {
+      embeds: [embed],
+      components: [
+        row1,
+        row2
+      ]
+    }
+  );
 }
 
 /* =========================================================
    DM
    ========================================================= */
 
-async function handleDM(message, args) {
+async function handleDM(
+  message,
+  args
+) {
   if (!isAdmin(message.member)) {
-    return safeReply(message, "❌ Bu komut yalnızca Yönetici içindir.");
+    return safeReply(
+      message,
+      "❌ Bu komut Yönetici içindir."
+    );
   }
 
-  const target = message.mentions.users.first();
+  const target =
+    message.mentions.users.first();
 
   if (!target) {
     return safeReply(
@@ -2270,15 +3033,18 @@ async function handleDM(message, args) {
     );
   }
 
-  const text = args
-    .filter(x => !/^<@!?\d+>$/.test(x))
-    .join(" ")
-    .trim();
+  const text =
+    args
+      .filter(
+        x => !/^<@!?\d+>$/.test(x)
+      )
+      .join(" ")
+      .trim();
 
   if (!text) {
     return safeReply(
       message,
-      "❌ Gönderilecek mesajı yazmalısın."
+      "❌ Mesaj yazmalısın."
     );
   }
 
@@ -2301,16 +3067,21 @@ async function handleDM(message, args) {
    MODERASYON
    ========================================================= */
 
-async function handleModeration(message, command, args) {
+async function handleModeration(
+  message,
+  command,
+  args
+) {
   if (!isAdmin(message.member)) {
     return safeReply(
       message,
-      "❌ Bu komut yalnızca Yönetici içindir."
+      "❌ Bu komut Yönetici içindir."
     );
   }
 
   if (command === "sil") {
-    const amount = Number(args[0]);
+    const amount =
+      Number(args[0]);
 
     if (
       !Number.isInteger(amount) ||
@@ -2319,23 +3090,27 @@ async function handleModeration(message, command, args) {
     ) {
       return safeReply(
         message,
-        "❌ 1-1000 arasında bir miktar belirt."
+        "❌ 1-1000 arası sayı gir."
       );
     }
 
     try {
-      const messages =
+      const deleted =
         await message.channel.bulkDelete(
           amount,
           true
         );
 
-      const info = await message.channel.send(
-        `🧹 **${messages.size} mesaj silindi.**`
-      );
+      const msg =
+        await message.channel.send(
+          `🧹 **${deleted.size} mesaj silindi.**`
+        );
 
       setTimeout(
-        () => info.delete().catch(() => {}),
+        () =>
+          msg.delete().catch(
+            () => {}
+          ),
         3000
       );
     } catch {
@@ -2359,20 +3134,34 @@ async function handleModeration(message, command, args) {
   }
 
   if (command === "kick") {
-    await target.kick().catch(() => null);
-    return safeReply(message, `👢 ${target} sunucudan atıldı.`);
+    await target.kick().catch(
+      () => {}
+    );
+
+    return safeReply(
+      message,
+      `👢 ${target} sunucudan atıldı.`
+    );
   }
 
   if (command === "ban") {
-    await target.ban().catch(() => null);
-    return safeReply(message, `🔨 ${target} sunucudan yasaklandı.`);
+    await target.ban().catch(
+      () => {}
+    );
+
+    return safeReply(
+      message,
+      `🔨 ${target} yasaklandı.`
+    );
   }
 
   if (command === "mute") {
     await target.timeout(
       60 * 60 * 1000,
       "Axera League moderasyon"
-    ).catch(() => null);
+    ).catch(
+      () => {}
+    );
 
     return safeReply(
       message,
@@ -2381,7 +3170,11 @@ async function handleModeration(message, command, args) {
   }
 
   if (command === "unmute") {
-    await target.timeout(null).catch(() => null);
+    await target.timeout(
+      null
+    ).catch(
+      () => {}
+    );
 
     return safeReply(
       message,
@@ -2394,39 +3187,61 @@ async function handleModeration(message, command, args) {
    EMBED
    ========================================================= */
 
-async function handleEmbed(message, args) {
+async function handleEmbed(
+  message,
+  args
+) {
   if (!isAdmin(message.member)) {
-    return safeReply(message, "❌ Bu komut Yönetici içindir.");
+    return safeReply(
+      message,
+      "❌ Bu komut Yönetici içindir."
+    );
   }
 
-  const raw = args.join(" ");
-  const [title, description] =
-    raw.split("|").map(x => x.trim());
+  const raw =
+    args.join(" ");
+
+  const [
+    title,
+    description
+  ] =
+    raw
+      .split("|")
+      .map(
+        x => x.trim()
+      );
 
   if (!title || !description) {
     return safeReply(
       message,
-      "❌ Kullanım: `.embed Başlık | Açıklama`"
+      "❌ `.embed Başlık | Açıklama`"
     );
   }
 
-  const embed = new EmbedBuilder()
-    .setTitle(title)
-    .setDescription(description)
-    .setTimestamp();
-
   await safeDelete(message);
 
-  safeSend(message.channel, {
-    embeds: [embed]
-  });
+  safeSend(
+    message.channel,
+    {
+      embeds: [
+        new EmbedBuilder()
+          .setTitle(title)
+          .setDescription(
+            description
+          )
+          .setTimestamp()
+      ]
+    }
+  );
 }
 
 /* =========================================================
    ŞART
    ========================================================= */
 
-async function handleConditions(message) {
+async function handleConditions(
+  message
+) {
   safeReply(
     message,
     [
@@ -2445,144 +3260,170 @@ async function handleConditions(message) {
    YARDIM
    ========================================================= */
 
-async function handleHelp(message) {
-  const embed = new EmbedBuilder()
-    .setTitle("📚 Axera League Komut Listesi")
-    .setDescription(
-      [
-        "### 👤 Kayıt",
-        "`.k @Oyuncu İsim`",
-        "`.kayıtsızver @Oyuncu`",
-        "`.ara isim`",
-        "",
-        "### 💰 Değer",
-        "`.dver @Oyuncu 5M`",
-        "`.dsil @Oyuncu 5M`",
-        "",
-        "### ⚽ Futbol",
-        "`.ant` / `.antrenman`",
-        "`.pen` / `.penaltı`",
-        "`.tweet mesaj`",
-        "`.maç @Takım1 @Takım2`",
-        "",
-        "### 🏟️ Takım",
-        "`.takımekle @Takım`",
-        "`.takımkaldır @Takım`",
-        "`.takımdeğer @Takım 850M`",
-        "`.kadroekle @Takım @Oyuncu Pozisyon`",
-        "`.kadrocikar @Takım @Oyuncu`",
-        "`.kadro @Takım`",
-        "`.formasyon @Takım`",
-        "`.puan`",
-        "`.puanekle @Takım 3`",
-        "",
-        "### 📅 Fikstür",
-        "`.fiksturekle @Takım1 @Takım2 YYYY-MM-DD HH:MM`",
-        "`.fikstür`",
-        "`.fiksturcikar @Takım1 @Takım2`",
-        "",
-        "### 🏆 Kupa",
-        "`.kupaekle @Takım Kupa`",
-        "`.kupasil @Takım Kupa`",
-        "`.müze @Takım`",
-        "",
-        "### 🎫 Destek",
-        "`.ticketpanel`",
-        "",
-        "### 🎭 Roller",
-        "`.rolpanel`",
-        "",
-        "### 🤖 AI",
-        "`.ai soru`",
-        "`.yapayzeka soru`",
-        "AI kanalında normal mesaj da yazabilirsiniz.",
-        "",
-        "### 🛡️ Yönetim",
-        "`.sil miktar`",
-        "`.embed Başlık | Açıklama`",
-        "`.kick @Oyuncu`",
-        "`.ban @Oyuncu`",
-        "`.mute @Oyuncu`",
-        "`.unmute @Oyuncu`",
-        "`.dm @Oyuncu mesaj`",
-        "",
-        "`.şart`"
-      ].join("\n")
-    )
-    .setFooter({
-      text: "Axera League • Futbol RP"
-    });
+async function handleHelp(
+  message
+) {
+  const embed =
+    new EmbedBuilder()
+      .setTitle(
+        "📚 Axera League Komutları"
+      )
+      .setDescription(
+        [
+          "### 👤 Kayıt",
+          "`.k @Oyuncu İsim`",
+          "`.kayıtsızver @Oyuncu`",
+          "`.ara isim`",
+          "",
+          "### 💰 Değer",
+          "`.dver @Oyuncu 5M`",
+          "`.dsil @Oyuncu 5M`",
+          "",
+          "### ⚽ Futbol",
+          "`.ant`",
+          "`.antrenman`",
+          "`.pen`",
+          "`.penaltı`",
+          "`.tweet mesaj`",
+          "`.maç @Takım1 @Takım2`",
+          "",
+          "### 🏟️ Takım",
+          "`.takımekle @Takım`",
+          "`.takımkaldır @Takım`",
+          "`.takımdeğer @Takım 850M`",
+          "`.kadroekle @Takım @Oyuncu Pozisyon`",
+          "`.kadrocikar @Takım @Oyuncu`",
+          "`.kadro @Takım`",
+          "`.formasyon @Takım`",
+          "`.puan`",
+          "`.puanekle @Takım 3`",
+          "",
+          "### 📅 Fikstür",
+          "`.fiksturekle @Takım1 @Takım2 YYYY-MM-DD HH:MM`",
+          "`.fikstür`",
+          "`.fiksturcikar @Takım1 @Takım2`",
+          "",
+          "### 🏆 Kupa",
+          "`.kupaekle @Takım Kupa`",
+          "`.kupasil @Takım Kupa`",
+          "`.müze @Takım`",
+          "",
+          "### 🎫 Destek",
+          "`.ticketpanel`",
+          "",
+          "### 🎭 Roller",
+          "`.rolpanel`",
+          "",
+          "### 🤖 AI",
+          "`.ai soru`",
+          "`.yapayzeka soru`",
+          "AI kanalında normal mesaj",
+          "",
+          "### 🛡️ Yönetim",
+          "`.sil miktar`",
+          "`.embed Başlık | Açıklama`",
+          "`.kick @Oyuncu`",
+          "`.ban @Oyuncu`",
+          "`.mute @Oyuncu`",
+          "`.unmute @Oyuncu`",
+          "`.dm @Oyuncu mesaj`",
+          "",
+          "`.şart`",
+          "`.ping`"
+        ].join("\n")
+      )
+      .setFooter({
+        text:
+          "Axera League | Futbol RP"
+      });
 
-  safeReply(message, {
-    embeds: [embed]
-  });
+  safeReply(
+    message,
+    {
+      embeds: [embed]
+    }
+  );
 }
 
 /* =========================================================
    AI
    ========================================================= */
 
-async function askAI(userId, input) {
+async function askAI(
+  userId,
+  question
+) {
   if (!openai) {
-    return "❌ AI sistemi aktif değil. Railway'de `OPENAI_API_KEY` değişkenini ekleyin.";
+    return "❌ AI aktif değil. Railway Variables kısmına OPENAI_API_KEY ekleyin.";
   }
 
-  const text = String(input || "").trim();
+  const text =
+    String(question)
+      .trim();
 
   if (!text) {
     return "❌ Bir soru yazmalısın.";
   }
 
   if (
-    normalize(text).includes("seni kim kurdu")
+    normalize(text).includes(
+      "seni kim kurdu"
+    )
   ) {
     return "Lynox9380 kurdu.";
   }
 
-  const key = String(userId);
-
-  if (!data.aiMemory[key]) {
-    data.aiMemory[key] = [];
+  if (!data.aiMemory[userId]) {
+    data.aiMemory[userId] = [];
   }
 
-  const memory = data.aiMemory[key];
+  const memory =
+    data.aiMemory[userId];
 
   memory.push({
     role: "user",
     content: text
   });
 
-  while (memory.length > 8) {
+  while (
+    memory.length > 8
+  ) {
     memory.shift();
   }
 
   try {
-    const response = await openai.responses.create({
-      model: AI_MODEL,
-      input: [
-        {
-          role: "system",
-          content:
-            "Sen Axera adlı Türkçe konuşan Discord AI asistanısın. " +
-            "Kısa, hızlı, doğal ve yardımcı cevaplar ver. " +
-            "Sunucu yönetimi gibi işlemleri kendin yapma; Discord komutlarını kullanıcının çalıştırması gerektiğini belirt. " +
-            "Kullanıcı senden seni kimin kurduğunu sorarsa tam olarak 'Lynox9380 kurdu.' de."
-        },
-        ...memory
-      ],
-      max_output_tokens: 500
-    });
+    const response =
+      await openai.responses.create({
+        model: AI_MODEL,
+
+        input: [
+          {
+            role: "system",
+            content:
+              "Sen Axera adlı Türkçe Discord AI asistanısın. " +
+              "Kısa, hızlı, doğal ve yardımcı cevaplar ver. " +
+              "Kullanıcı senden seni kimin kurduğunu sorarsa tam olarak 'Lynox9380 kurdu.' de. " +
+              "Discord sunucu yönetim işlemlerini kendin gerçekleştirme; ilgili komutu kullanıcının çalıştırması gerektiğini söyle."
+          },
+
+          ...memory
+        ],
+
+        max_output_tokens: 500
+      });
 
     const answer =
       response.output_text?.trim() ||
-      "❌ AI cevap üretemedi.";
+      "❌ Cevap oluşturulamadı.";
 
     memory.push({
       role: "assistant",
       content: answer
     });
 
-    while (memory.length > 8) {
+    while (
+      memory.length > 8
+    ) {
       memory.shift();
     }
 
@@ -2590,14 +3431,21 @@ async function askAI(userId, input) {
 
     return answer;
   } catch (error) {
-    console.error("OpenAI hatası:", error);
+    console.error(
+      "OPENAI HATASI:",
+      error
+    );
 
-    return "❌ AI şu anda cevap veremiyor. Birkaç saniye sonra tekrar deneyin.";
+    return "❌ Axera AI şu anda cevap veremiyor.";
   }
 }
 
-async function handleAICommand(message, args) {
-  const question = args.join(" ").trim();
+async function handleAICommand(
+  message,
+  args
+) {
+  const question =
+    args.join(" ").trim();
 
   if (!question) {
     return safeReply(
@@ -2606,30 +3454,47 @@ async function handleAICommand(message, args) {
     );
   }
 
-  const thinking = await safeReply(
-    message,
-    "🤖 **Axera düşünüyor...**"
-  );
+  const loading =
+    await safeReply(
+      message,
+      "🤖 **Axera düşünüyor...**"
+    );
 
   const answer =
-    await askAI(message.author.id, question);
+    await askAI(
+      message.author.id,
+      question
+    );
 
-  if (thinking) {
-    await thinking.edit({
-      content: answer.substring(0, 1900)
-    }).catch(() => {});
+  if (loading) {
+    await loading.edit({
+      content:
+        answer.substring(
+          0,
+          1900
+        )
+    }).catch(
+      () => {}
+    );
   }
 }
 
-async function handleAIChannel(message) {
+async function handleAIChannel(
+  message
+) {
   if (
-    message.channel.id !== IDS.channels.ai ||
+    message.channel.id !==
+      IDS.channels.ai ||
     message.author.bot
   ) {
     return;
   }
 
-  if (message.content.startsWith(PREFIX)) {
+  if (
+    message.content.startsWith(
+      PREFIX
+    )
+  ) {
     return;
   }
 
@@ -2639,19 +3504,38 @@ async function handleAIChannel(message) {
       message.content
     );
 
-  for (const chunk of splitMessage(answer)) {
-    await safeSend(message.channel, {
-      content: chunk
-    });
+  const chunks = [];
+
+  for (
+    let i = 0;
+    i < answer.length;
+    i += 1900
+  ) {
+    chunks.push(
+      answer.substring(
+        i,
+        i + 1900
+      )
+    );
+  }
+
+  for (
+    const chunk of chunks
+  ) {
+    await safeSend(
+      message.channel,
+      {
+        content: chunk
+      }
+    );
   }
 }
 
 /* =========================================================
-   DURUM MESAJI
+   BOT DURUM
    ========================================================= */
 
 let lastStatusKey = null;
-let statusMessageId = null;
 
 async function updateBotStatus() {
   const channel =
@@ -2659,40 +3543,52 @@ async function updateBotStatus() {
       IDS.channels.botStatus
     );
 
-  if (!channel?.isTextBased?.()) return;
+  if (!channel?.isTextBased?.()) {
+    return;
+  }
 
   /*
-   * Önce bot durum kanalındaki BOTUN eski mesajlarını
-   * temizle.
+   * BOT DURUM KANALINDA SADECE BOTUN
+   * ÖNCEKİ MESAJLARINI SİL.
    */
   try {
     const messages =
       await channel.messages.fetch({
-        limit: 50
+        limit: 100
       });
 
-    const ownMessages =
+    const botMessages =
       messages.filter(
         msg =>
-          msg.author.id === client.user.id
+          msg.author.id ===
+          client.user.id
       );
 
-    for (const msg of ownMessages.values()) {
-      await msg.delete().catch(() => {});
+    for (
+      const msg
+      of botMessages.values()
+    ) {
+      await msg.delete().catch(
+        () => {}
+      );
     }
   } catch (error) {
     console.error(
-      "Bot durum eski mesaj temizleme hatası:",
-      error
+      "DURUM MESAJI TEMİZLEME HATASI:",
+      error.message
     );
   }
 
-  const guildCount = client.guilds.cache.size;
+  const guildCount =
+    client.guilds.cache.size;
 
-  const userCount =
+  const memberCount =
     client.guilds.cache.reduce(
       (total, guild) =>
-        total + (guild.memberCount || 0),
+        total +
+        Number(
+          guild.memberCount || 0
+        ),
       0
     );
 
@@ -2701,120 +3597,92 @@ async function updateBotStatus() {
       ? `${client.ws.ping}ms`
       : "Bilinmiyor";
 
-  const uptimeSeconds =
-    Math.floor(process.uptime());
+  const uptime =
+    Math.floor(
+      process.uptime()
+    );
 
   const hours =
-    Math.floor(uptimeSeconds / 3600);
+    Math.floor(
+      uptime / 3600
+    );
 
   const minutes =
     Math.floor(
-      (uptimeSeconds % 3600) / 60
+      (uptime % 3600) / 60
     );
 
   const seconds =
-    uptimeSeconds % 60;
+    uptime % 60;
 
-  const embed = new EmbedBuilder()
-    .setTitle("🤖 Axera League • Bot Durumu")
-    .setDescription(
-      [
-        "🟢 **Bot Durumu:** Aktif",
-        `📡 **Ping:** ${ping}`,
-        `🏠 **Sunucu:** ${guildCount}`,
-        `👥 **Üye:** ${userCount}`,
-        `⚙️ **Komut:** ${COMMAND_COUNT}+`,
-        `⏱️ **Çalışma Süresi:** ${hours}s ${minutes}dk ${seconds}sn`,
-        "",
-        `🕐 **Son Güncelleme:** <t:${Math.floor(Date.now() / 1000)}:F>`,
-        "",
-        "🔄 Durum mesajı her **30 dakikada bir** yenilenir."
-      ].join("\n")
-    )
-    .setFooter({
-      text: "Axera League | Futbol RP"
-    })
-    .setTimestamp();
+  const embed =
+    new EmbedBuilder()
+      .setTitle(
+        "🤖 Axera League • Bot Durumu"
+      )
+      .setDescription(
+        [
+          "🟢 **Durum:** Aktif",
+          `📡 **Ping:** ${ping}`,
+          `🏠 **Sunucu:** ${guildCount}`,
+          `👥 **Üye:** ${memberCount}`,
+          `⚙️ **Komut:** ${COMMAND_COUNT}+`,
+          `⏱️ **Uptime:** ${hours}s ${minutes}dk ${seconds}sn`,
+          "",
+          `🕐 **Güncelleme:** <t:${Math.floor(
+            Date.now() / 1000
+          )}:F>`,
+          "",
+          "🔄 Her **30 dakikada bir** yenilenir."
+        ].join("\n")
+      )
+      .setFooter({
+        text:
+          "Axera League | Futbol RP"
+      })
+      .setTimestamp();
 
-  const sent =
-    await safeSend(channel, {
+  await safeSend(
+    channel,
+    {
       embeds: [embed]
-    });
-
-  if (sent) {
-    statusMessageId = sent.id;
-  }
+    }
+  );
 }
 
 function startStatusScheduler() {
-  setInterval(async () => {
-    try {
-      const now = new Date();
+  setInterval(
+    async () => {
+      try {
+        const now =
+          new Date();
 
-      const key =
-        `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${now.getHours()}-${now.getMinutes()}`;
+        const minute =
+          now.getMinutes();
 
-      /*
-       * 00 ve 30 dakikalarında gönder.
-       */
-      if (
-        (now.getMinutes() === 0 ||
-          now.getMinutes() === 30) &&
-        lastStatusKey !== key
-      ) {
-        lastStatusKey = key;
+        const key =
+          `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${now.getHours()}-${minute}`;
 
-        await updateBotStatus();
-      }
-    } catch (error) {
-      console.error(
-        "Status scheduler hatası:",
-        error
-      );
-    }
-  }, 60 * 1000);
-}
+        if (
+          (
+            minute === 0 ||
+            minute === 30
+          ) &&
+          lastStatusKey !== key
+        ) {
+          lastStatusKey = key;
 
-/* =========================================================
-   TICKET AUTO CLOSE
-   ========================================================= */
-
-function startTicketScheduler() {
-  setInterval(async () => {
-    const now = Date.now();
-
-    for (const [channelId, ticket] of Object.entries(
-      data.tickets
-    )) {
-      if (!ticket.open) continue;
-
-      const last =
-        Number(ticket.lastMessage || 0);
-
-      if (
-        last > 0 &&
-        now - last >= 60 * 60 * 1000
-      ) {
-        ticket.open = false;
-
-        const channel =
-          client.channels.cache.get(channelId);
-
-        if (channel) {
-          await safeSend(
-            channel,
-            "⏰ Bu ticketta 60 dakika boyunca mesaj gelmediği için kapatılıyor."
-          );
-
-          setTimeout(() => {
-            channel.delete().catch(() => {});
-          }, 3000);
+          await updateBotStatus();
         }
+      } catch (error) {
+        console.error(
+          "STATUS SCHEDULER HATASI:",
+          error
+        );
       }
-    }
-
-    saveData();
-  }, 60 * 1000);
+    },
+    60 * 1000
+  );
 }
 
 /* =========================================================
@@ -2822,100 +3690,154 @@ function startTicketScheduler() {
    ========================================================= */
 
 function startFixtureScheduler() {
-  setInterval(async () => {
-    const now = Date.now();
+  setInterval(
+    async () => {
+      try {
+        const now =
+          Date.now();
 
-    for (const fixture of data.fixtures) {
-      if (fixture.started) continue;
+        for (
+          const fixture
+          of data.fixtures
+        ) {
+          if (
+            fixture.started
+          ) continue;
 
-      if (fixture.timestamp <= now) {
-        fixture.started = true;
+          if (
+            fixture.timestamp <=
+            now
+          ) {
+            fixture.started =
+              true;
 
-        const guild =
-          client.guilds.cache.find(
-            g =>
-              g.roles.cache.has(fixture.team1) &&
-              g.roles.cache.has(fixture.team2)
-          );
+            const guild =
+              client.guilds.cache.find(
+                g =>
+                  g.roles.cache.has(
+                    fixture.team1
+                  ) &&
+                  g.roles.cache.has(
+                    fixture.team2
+                  )
+              );
 
-        if (!guild) continue;
+            if (!guild) {
+              continue;
+            }
 
-        const alreadyActive =
-          Object.values(data.activeMatches)
-            .some(
-              m =>
-                (
-                  m.team1 === fixture.team1 &&
-                  m.team2 === fixture.team2
-                ) ||
-                (
-                  m.team1 === fixture.team2 &&
-                  m.team2 === fixture.team1
-                )
+            await startMatch(
+              guild,
+              fixture.team1,
+              fixture.team2
             );
 
-        if (!alreadyActive) {
-          await startMatch(
-            guild,
-            fixture.team1,
-            fixture.team2
-          );
+            saveData();
+          }
         }
-
-        saveData();
+      } catch (error) {
+        console.error(
+          "FİKSTÜR SCHEDULER HATASI:",
+          error
+        );
       }
-    }
-  }, 1000);
+    },
+    1000
+  );
 }
 
 /* =========================================================
-   BUTTONS
+   TICKET SCHEDULER
    ========================================================= */
 
-async function handleButton(interaction) {
-  const id = interaction.customId;
+function startTicketScheduler() {
+  setInterval(
+    async () => {
+      try {
+        const now =
+          Date.now();
 
-  /* KAYIT PANELİ */
+        for (
+          const [
+            channelId,
+            ticket
+          ]
+          of Object.entries(
+            data.tickets
+          )
+        ) {
+          if (!ticket.open)
+            continue;
+
+          if (
+            now -
+              Number(
+                ticket.lastMessage ||
+                  0
+              ) >=
+            60 * 60 * 1000
+          ) {
+            ticket.open =
+              false;
+
+            const channel =
+              client.channels.cache.get(
+                channelId
+              );
+
+            if (channel) {
+              await safeSend(
+                channel,
+                "⏰ 60 dakika boyunca mesaj gelmediği için ticket kapatılıyor."
+              );
+
+              setTimeout(
+                () =>
+                  channel
+                    .delete()
+                    .catch(
+                      () => {}
+                    ),
+                3000
+              );
+            }
+          }
+        }
+
+        saveData();
+      } catch (error) {
+        console.error(
+          "TICKET SCHEDULER HATASI:",
+          error
+        );
+      }
+    },
+    60 * 1000
+  );
+}
+
+/* =========================================================
+   BUTTON
+   ========================================================= */
+
+async function handleButton(
+  interaction
+) {
+  const id =
+    interaction.customId;
+
+  /* KAYIT */
 
   if (
-    id === "register_player" ||
-    id === "register_member" ||
-    id === "register_td" ||
-    id === "register_gk"
+    id.startsWith(
+      "reg_"
+    )
   ) {
-    if (!isRegistrationStaff(interaction.member)) {
-      return interaction.reply({
-        content:
-          "❌ Kayıt panelini yalnızca Kayıt Yetkilisi veya Yönetici kullanabilir.",
-        ephemeral: true
-      });
-    }
-
-    let type = "player";
-
-    if (id === "register_member") type = "member";
-    if (id === "register_td") type = "td";
-    if (id === "register_gk") type = "gk";
-
-    const typeMap = {
-      player: "Futbolcu",
-      member: "Üye",
-      td: "Teknik Direktör",
-      gk: "Kaleci"
-    };
-
-    return interaction.reply({
-      content:
-        `ℹ️ Bu genel kayıt panelidir. ` +
-        `Belirli bir kullanıcı için \`.k @Oyuncu İsim\` komutuyla açılan kayıt panelini kullanın.`,
-      ephemeral: true
-    });
-  }
-
-  /* .K İLE AÇILAN PANEL */
-
-  if (id.startsWith("regtype_")) {
-    if (!isRegistrationStaff(interaction.member)) {
+    if (
+      !isRegistrationStaff(
+        interaction.member
+      )
+    ) {
       return interaction.reply({
         content:
           "❌ Bu kayıt panelini yalnızca Kayıt Yetkilisi veya Yönetici kullanabilir.",
@@ -2923,58 +3845,64 @@ async function handleButton(interaction) {
       });
     }
 
-    const parts = id.split("_");
+    const parts =
+      id.split("_");
 
-    const type = parts[1];
-    const targetId = parts[2];
+    const type =
+      parts[1];
+
+    const targetId =
+      parts[2];
 
     const panel =
       data.registrationPanels[
         interaction.message.id
       ];
 
-    if (
-      panel &&
-      panel.targetId !== targetId
-    ) {
-      return interaction.reply({
-        content: "❌ Kayıt paneli bilgisi eşleşmiyor.",
-        ephemeral: true
-      });
-    }
-
     const target =
       await interaction.guild.members
-        .fetch(targetId)
-        .catch(() => null);
+        .fetch(
+          targetId
+        )
+        .catch(
+          () => null
+        );
 
     if (!target) {
       return interaction.reply({
-        content: "❌ Kullanıcı bulunamadı.",
+        content:
+          "❌ Kullanıcı bulunamadı.",
         ephemeral: true
       });
     }
 
     const nickname =
-      panel?.nickname || target.displayName;
+      panel?.nickname ||
+      target.displayName;
 
-    const roleName =
-      await registerUser(
+    const roleId =
+      await registerMember(
         target,
         type,
-        nickname,
-        interaction.member
+        nickname
+      );
+
+    const role =
+      interaction.guild.roles.cache.get(
+        roleId
       );
 
     await interaction.update({
       embeds: [
         new EmbedBuilder()
-          .setTitle("✅ Kayıt Tamamlandı")
+          .setTitle(
+            "✅ Kayıt Tamamlandı"
+          )
           .setDescription(
             `${target}\n\n` +
-            `👤 Kayıt Türü: **${roleName}**\n` +
+            `👤 Tür: **${role?.name || "Kayıt"}**\n` +
             `📝 İsim: **${nickname}**\n` +
-            `🛡️ Kayıt Yetkilisi: ${interaction.user}`
+            `🛡️ Yetkili: ${interaction.user}`
           )
           .setTimestamp()
       ],
@@ -2990,85 +3918,111 @@ async function handleButton(interaction) {
     return;
   }
 
-  /* ROL PANELİ */
+  /* ROLLER */
 
-  const pingMap = {
-    ping_partner: IDS.roles.pingRoles.partner,
-    ping_match: IDS.roles.pingRoles.match,
-    ping_announcement: IDS.roles.pingRoles.announcement,
-    ping_giveaway: IDS.roles.pingRoles.giveaway,
-    ping_media: IDS.roles.pingRoles.media
+  const roleMap = {
+    ping_partner:
+      IDS.pingRoles.partner,
+
+    ping_match:
+      IDS.pingRoles.match,
+
+    ping_announcement:
+      IDS.pingRoles.announcement,
+
+    ping_giveaway:
+      IDS.pingRoles.giveaway,
+
+    ping_media:
+      IDS.pingRoles.media
   };
 
-  if (pingMap[id]) {
-    const roleId = pingMap[id];
+  if (roleMap[id]) {
+    const roleId =
+      roleMap[id];
 
-    if (interaction.member.roles.cache.has(roleId)) {
-      await interaction.member.roles.remove(roleId);
+    if (
+      interaction.member.roles.cache.has(
+        roleId
+      )
+    ) {
+      await interaction.member.roles.remove(
+        roleId
+      );
 
       return interaction.reply({
-        content: "❌ Bildirim rolü kaldırıldı.",
+        content:
+          "❌ Bildirim rolü kaldırıldı.",
         ephemeral: true
       });
     }
 
-    await interaction.member.roles.add(roleId);
+    await interaction.member.roles.add(
+      roleId
+    );
 
     return interaction.reply({
-      content: "✅ Bildirim rolü verildi.",
+      content:
+        "✅ Bildirim rolü verildi.",
       ephemeral: true
     });
   }
 
-  /* FORMASYON */
-
-  if (id.startsWith("formation_")) {
-    if (!isCommentator(interaction.member)) {
-      return interaction.reply({
-        content: "❌ Bu işlem Spiker/Yönetici içindir.",
-        ephemeral: true
-      });
-    }
-
-    return;
-  }
-
   /* TICKET */
 
-  if (id === "create_ticket") {
-    return createTicket(interaction);
+  if (
+    id ===
+    "create_ticket"
+  ) {
+    return createTicket(
+      interaction
+    );
   }
 
-  if (id === "close_ticket") {
-    return closeTicket(interaction);
+  if (
+    id ===
+    "close_ticket"
+  ) {
+    return closeTicket(
+      interaction
+    );
   }
 }
 
 /* =========================================================
-   SELECT MENU
+   SELECT
    ========================================================= */
 
-async function handleSelect(interaction) {
+async function handleSelect(
+  interaction
+) {
   if (
     interaction.customId.startsWith(
       "formation_"
     )
   ) {
-    if (!isCommentator(interaction.member)) {
+    if (
+      !isCommentator(
+        interaction.member
+      )
+    ) {
       return interaction.reply({
-        content: "❌ Bu işlem Spiker/Yönetici içindir.",
+        content:
+          "❌ Bu işlem Spiker/Yönetici içindir.",
         ephemeral: true
       });
     }
 
-    const teamRoleId =
-      interaction.customId.split("_")[1];
+    const teamId =
+      interaction.customId
+        .split("_")[1];
 
     const formation =
       interaction.values[0];
 
-    data.formations[teamRoleId] =
-      formation;
+    data.formations[
+      teamId
+    ] = formation;
 
     saveData();
 
@@ -3081,338 +4035,467 @@ async function handleSelect(interaction) {
 }
 
 /* =========================================================
-   MESAJ EVENT
+   MESSAGE CREATE
    ========================================================= */
 
-client.on("messageCreate", async message => {
-  try {
-    if (!message.guild) return;
-    if (message.author.bot) return;
+client.on(
+  "messageCreate",
+  async message => {
+    try {
+      if (
+        !message.guild ||
+        message.author.bot
+      ) {
+        return;
+      }
 
-    /* AI KANALI */
+      /*
+       * Ticket mesaj zamanı
+       */
+      const ticket =
+        data.tickets[
+          message.channel.id
+        ];
 
-    await handleAIChannel(message);
+      if (
+        ticket?.open
+      ) {
+        ticket.lastMessage =
+          Date.now();
 
-    /* KOMUT DEĞİLSE BİTİR */
+        saveData();
+      }
 
-    if (!message.content.startsWith(PREFIX)) {
-      return;
-    }
-
-    const raw =
-      message.content
-        .slice(PREFIX.length)
-        .trim();
-
-    if (!raw) return;
-
-    const parts =
-      raw.split(/\s+/);
-
-    const command =
-      normalize(parts.shift());
-
-    const args = parts;
-
-    /* KAYIT */
-
-    if (command === "k") {
-      return handleRegisterCommand(
-        message,
-        args
-      );
-    }
-
-    if (
-      command === "kayitsizver" ||
-      command === "kayıtsızver"
-    ) {
-      return handleUnregister(
-        message,
-        args
-      );
-    }
-
-    /* ARA */
-
-    if (command === "ara") {
-      return handleSearch(
-        message,
-        args
-      );
-    }
-
-    /* DEĞER */
-
-    if (command === "dver") {
-      return handleValueCommand(
-        message,
-        args,
-        true
-      );
-    }
-
-    if (command === "dsil") {
-      return handleValueCommand(
-        message,
-        args,
-        false
-      );
-    }
-
-    /* ANTRENMAN */
-
-    if (
-      command === "ant" ||
-      command === "antrenman"
-    ) {
-      return handleTraining(message);
-    }
-
-    /* PENALTI */
-
-    if (
-      command === "pen" ||
-      command === "penalti" ||
-      command === "penaltı"
-    ) {
-      return handlePenalty(message);
-    }
-
-    /* TWEET */
-
-    if (command === "tweet") {
-      return handleTweet(
-        message,
-        args
-      );
-    }
-
-    /* TAKIM */
-
-    if (command === "takımekle") {
-      return handleTeamAdd(message);
-    }
-
-    if (
-      command === "takımkaldır" ||
-      command === "takimkaldir"
-    ) {
-      return handleTeamRemove(message);
-    }
-
-    if (
-      command === "takımdeğer" ||
-      command === "takimdeger"
-    ) {
-      return handleTeamValue(
-        message,
-        args
-      );
-    }
-
-    /* KADRO */
-
-    if (command === "kadroekle") {
-      return handleSquadAdd(
-        message,
-        args
-      );
-    }
-
-    if (
-      command === "kadrocikar" ||
-      command === "kadrocıkart"
-    ) {
-      return handleSquadRemove(
+      /*
+       * AI kanalı
+       */
+      await handleAIChannel(
         message
       );
-    }
 
-    if (
-      command === "kadro" ||
-      command === "kadrom"
-    ) {
-      return handleSquad(message);
-    }
+      /*
+       * Komut değilse bitir
+       */
+      if (
+        !message.content.startsWith(
+          PREFIX
+        )
+      ) {
+        return;
+      }
 
-    /* FORMASYON */
+      const raw =
+        message.content
+          .slice(
+            PREFIX.length
+          )
+          .trim();
 
-    if (command === "formasyon") {
-      return handleFormation(message);
-    }
+      if (!raw) return;
 
-    /* PUAN */
+      const parts =
+        raw.split(/\s+/);
 
-    if (
-      command === "puan" ||
-      command === "puandurumu"
-    ) {
-      return handleStandings(message);
-    }
+      const command =
+        normalize(
+          parts.shift()
+        );
 
-    if (command === "puanekle") {
-      return handleAddPoints(
-        message,
-        args
+      const args =
+        parts;
+
+      /* KAYIT */
+
+      if (
+        command === "k"
+      ) {
+        return handleRegister(
+          message,
+          args
+        );
+      }
+
+      if (
+        command ===
+          "kayitsizver" ||
+        command ===
+          "kayıtsızver"
+      ) {
+        return handleUnregister(
+          message
+        );
+      }
+
+      /* ARA */
+
+      if (
+        command === "ara"
+      ) {
+        return handleSearch(
+          message,
+          args
+        );
+      }
+
+      /* DEĞER */
+
+      if (
+        command === "dver"
+      ) {
+        return handleValue(
+          message,
+          args,
+          true
+        );
+      }
+
+      if (
+        command === "dsil"
+      ) {
+        return handleValue(
+          message,
+          args,
+          false
+        );
+      }
+
+      /* ANTRENMAN */
+
+      if (
+        command === "ant" ||
+        command ===
+          "antrenman"
+      ) {
+        return handleTraining(
+          message
+        );
+      }
+
+      /* PENALTI */
+
+      if (
+        command === "pen" ||
+        command ===
+          "penalti" ||
+        command ===
+          "penaltı"
+      ) {
+        return handlePenalty(
+          message
+        );
+      }
+
+      /* TWEET */
+
+      if (
+        command === "tweet"
+      ) {
+        return handleTweet(
+          message,
+          args
+        );
+      }
+
+      /* TAKIM */
+
+      if (
+        command ===
+        "takımekle"
+      ) {
+        return handleTeamAdd(
+          message
+        );
+      }
+
+      if (
+        command ===
+          "takımkaldır" ||
+        command ===
+          "takimkaldir"
+      ) {
+        return handleTeamRemove(
+          message
+        );
+      }
+
+      if (
+        command ===
+          "takımdeğer" ||
+        command ===
+          "takimdeger"
+      ) {
+        return handleTeamValue(
+          message,
+          args
+        );
+      }
+
+      /* KADRO */
+
+      if (
+        command ===
+        "kadroekle"
+      ) {
+        return handleSquadAdd(
+          message,
+          args
+        );
+      }
+
+      if (
+        command ===
+          "kadrocikar" ||
+        command ===
+          "kadrocikart"
+      ) {
+        return handleSquadRemove(
+          message
+        );
+      }
+
+      if (
+        command ===
+          "kadro" ||
+        command ===
+          "kadrom"
+      ) {
+        return handleSquad(
+          message
+        );
+      }
+
+      /* FORMASYON */
+
+      if (
+        command ===
+        "formasyon"
+      ) {
+        return handleFormation(
+          message
+        );
+      }
+
+      /* PUAN */
+
+      if (
+        command ===
+          "puan" ||
+        command ===
+          "puandurumu"
+      ) {
+        return handleStandings(
+          message
+        );
+      }
+
+      if (
+        command ===
+        "puanekle"
+      ) {
+        return handleAddPoints(
+          message,
+          args
+        );
+      }
+
+      /* MAÇ */
+
+      if (
+        command === "maç" ||
+        command === "mac"
+      ) {
+        return handleMatch(
+          message
+        );
+      }
+
+      /* FİKSTÜR */
+
+      if (
+        command ===
+        "fiksturekle"
+      ) {
+        return handleFixtureAdd(
+          message,
+          args
+        );
+      }
+
+      if (
+        command ===
+          "fikstür" ||
+        command ===
+          "fikstur"
+      ) {
+        return handleFixtures(
+          message
+        );
+      }
+
+      if (
+        command ===
+        "fiksturcikar"
+      ) {
+        return handleFixtureRemove(
+          message
+        );
+      }
+
+      /* KUPA */
+
+      if (
+        command ===
+        "kupaekle"
+      ) {
+        return handleCupAdd(
+          message,
+          args
+        );
+      }
+
+      if (
+        command ===
+        "kupasil"
+      ) {
+        return handleCupRemove(
+          message,
+          args
+        );
+      }
+
+      if (
+        command === "müze" ||
+        command === "muze"
+      ) {
+        return handleMuseum(
+          message
+        );
+      }
+
+      /* TICKET */
+
+      if (
+        command ===
+        "ticketpanel"
+      ) {
+        return handleTicketPanel(
+          message
+        );
+      }
+
+      /* ROL PANEL */
+
+      if (
+        command ===
+        "rolpanel"
+      ) {
+        return handleRolePanel(
+          message
+        );
+      }
+
+      /* DM */
+
+      if (
+        command === "dm"
+      ) {
+        return handleDM(
+          message,
+          args
+        );
+      }
+
+      /* MODERASYON */
+
+      if (
+        [
+          "sil",
+          "kick",
+          "ban",
+          "mute",
+          "unmute"
+        ].includes(command)
+      ) {
+        return handleModeration(
+          message,
+          command,
+          args
+        );
+      }
+
+      /* EMBED */
+
+      if (
+        command ===
+        "embed"
+      ) {
+        return handleEmbed(
+          message,
+          args
+        );
+      }
+
+      /* AI */
+
+      if (
+        command === "ai" ||
+        command ===
+          "yapayzeka"
+      ) {
+        return handleAICommand(
+          message,
+          args
+        );
+      }
+
+      /* ŞART */
+
+      if (
+        command === "sart" ||
+        command === "şart"
+      ) {
+        return handleConditions(
+          message
+        );
+      }
+
+      /* YARDIM */
+
+      if (
+        command ===
+          "yardim" ||
+        command ===
+          "yardım"
+      ) {
+        return handleHelp(
+          message
+        );
+      }
+
+      /* PING */
+
+      if (
+        command ===
+        "ping"
+      ) {
+        return safeReply(
+          message,
+          `🏓 Pong! **${client.ws.ping}ms**`
+        );
+      }
+    } catch (error) {
+      console.error(
+        "MESSAGE CREATE HATASI:",
+        error
       );
-    }
 
-    /* MAÇ */
-
-    if (
-      command === "maç" ||
-      command === "mac"
-    ) {
-      return handleMatch(message);
-    }
-
-    /* FİKSTÜR */
-
-    if (
-      command === "fiksturekle"
-    ) {
-      return handleFixtureAdd(
+      safeReply(
         message,
-        args
-      );
+        "❌ İşlem sırasında beklenmeyen bir hata oluştu."
+      ).catch(() => {});
     }
-
-    if (
-      command === "fikstür" ||
-      command === "fikstur"
-    ) {
-      return handleFixtures(message);
-    }
-
-    if (
-      command === "fiksturcikar"
-    ) {
-      return handleFixtureRemove(message);
-    }
-
-    /* KUPA */
-
-    if (command === "kupaekle") {
-      return handleCupAdd(
-        message,
-        args
-      );
-    }
-
-    if (command === "kupasil") {
-      return handleCupRemove(
-        message,
-        args
-      );
-    }
-
-    if (
-      command === "müze" ||
-      command === "muze"
-    ) {
-      return handleMuseum(message);
-    }
-
-    /* TICKET */
-
-    if (command === "ticketpanel") {
-      return handleTicketPanel(message);
-    }
-
-    /* ROL PANELİ */
-
-    if (command === "rolpanel") {
-      return handleRolePanel(message);
-    }
-
-    /* DM */
-
-    if (command === "dm") {
-      return handleDM(
-        message,
-        args
-      );
-    }
-
-    /* MODERASYON */
-
-    if (
-      [
-        "sil",
-        "kick",
-        "ban",
-        "mute",
-        "unmute"
-      ].includes(command)
-    ) {
-      return handleModeration(
-        message,
-        command,
-        args
-      );
-    }
-
-    /* EMBED */
-
-    if (command === "embed") {
-      return handleEmbed(
-        message,
-        args
-      );
-    }
-
-    /* AI */
-
-    if (
-      command === "ai" ||
-      command === "yapayzeka"
-    ) {
-      return handleAICommand(
-        message,
-        args
-      );
-    }
-
-    /* ŞART */
-
-    if (
-      command === "sart" ||
-      command === "şart"
-    ) {
-      return handleConditions(message);
-    }
-
-    /* YARDIM */
-
-    if (
-      command === "yardim" ||
-      command === "yardım"
-    ) {
-      return handleHelp(message);
-    }
-
-    /* PING */
-
-    if (command === "ping") {
-      return safeReply(
-        message,
-        `🏓 Pong! **${client.ws.ping}ms**`
-      );
-    }
-
-  } catch (error) {
-    console.error(
-      "messageCreate hatası:",
-      error
-    );
-
-    safeReply(
-      message,
-      "❌ İşlem sırasında beklenmeyen bir hata oluştu."
-    ).catch(() => {});
   }
-});
+);
 
 /* =========================================================
    INTERACTION
@@ -3422,26 +4505,38 @@ client.on(
   "interactionCreate",
   async interaction => {
     try {
-      if (interaction.isButton()) {
-        return handleButton(interaction);
+      if (
+        interaction.isButton()
+      ) {
+        return handleButton(
+          interaction
+        );
       }
 
-      if (interaction.isStringSelectMenu()) {
-        return handleSelect(interaction);
+      if (
+        interaction.isStringSelectMenu()
+      ) {
+        return handleSelect(
+          interaction
+        );
       }
     } catch (error) {
       console.error(
-        "interactionCreate hatası:",
+        "INTERACTION HATASI:",
         error
       );
 
-      if (!interaction.replied &&
-          !interaction.deferred) {
+      if (
+        !interaction.replied &&
+        !interaction.deferred
+      ) {
         interaction.reply({
           content:
-            "❌ İşlem sırasında bir hata oluştu.",
+            "❌ İşlem sırasında hata oluştu.",
           ephemeral: true
-        }).catch(() => {});
+        }).catch(
+          () => {}
+        );
       }
     }
   }
@@ -3461,7 +4556,11 @@ client.on(
         );
 
       if (role) {
-        await member.roles.add(role).catch(() => {});
+        await member.roles.add(
+          role
+        ).catch(
+          () => {}
+        );
       }
 
       const channel =
@@ -3470,49 +4569,42 @@ client.on(
         );
 
       if (channel) {
-        const embed = new EmbedBuilder()
-          .setTitle("👋 Yeni Üye Geldi!")
-          .setDescription(
-            `${member}\n\n` +
-            `Sunucumuza hoş geldin!\n` +
-            `Kayıt işlemin için <@&${IDS.roles.registration}> ekibinden yardım alabilirsin.`
-          )
-          .setTimestamp();
+        const embed =
+          new EmbedBuilder()
+            .setTitle(
+              "👋 Yeni Üye!"
+            )
+            .setDescription(
+              `${member}\n\n` +
+              `Sunucumuza hoş geldin!\n` +
+              `<@&${IDS.roles.registration}> kayıt işleminle ilgilenecektir.`
+            )
+            .setTimestamp();
 
-        await safeSend(channel, {
-          content: `<@&${IDS.roles.registration}>`,
-          embeds: [embed]
-        });
+        await safeSend(
+          channel,
+          {
+            content:
+              `<@&${IDS.roles.registration}>`,
+            embeds: [embed]
+          }
+        );
       }
 
-      ensureUser(member.id).registered = false;
-      saveData();
+      const user =
+        ensureUser(
+          member.id
+        );
 
+      user.registered =
+        false;
+
+      saveData();
     } catch (error) {
       console.error(
-        "guildMemberAdd hatası:",
+        "YENİ ÜYE HATASI:",
         error
       );
-    }
-  }
-);
-
-/* =========================================================
-   TICKET MESAJ TAKİBİ
-   ========================================================= */
-
-client.on(
-  "messageCreate",
-  message => {
-    if (!message.guild) return;
-    if (message.author.bot) return;
-
-    const ticket =
-      data.tickets[message.channel.id];
-
-    if (ticket?.open) {
-      ticket.lastMessage = Date.now();
-      saveData();
     }
   }
 );
@@ -3521,36 +4613,58 @@ client.on(
    READY
    ========================================================= */
 
-client.once("ready", async () => {
-  console.log("================================");
-  console.log("AXERA LEAGUE BOT AKTİF");
-  console.log(`Bot: ${client.user.tag}`);
-  console.log(`Sunucu: ${client.guilds.cache.size}`);
-  console.log(`Ping: ${client.ws.ping}ms`);
-  console.log("================================");
+client.once(
+  "ready",
+  async () => {
+    console.log(
+      "================================"
+    );
 
-  try {
-    client.user.setPresence({
-      activities: [
-        {
-          name: "Axera League | Futbol RP",
-          type: 0
-        }
-      ],
-      status: "online"
-    });
-  } catch {}
+    console.log(
+      "AXERA LEAGUE BOT AKTİF"
+    );
 
-  /*
-   * Bot açıldığında mevcut durum mesajlarını temizleyip
-   * ilk durum mesajını gönder.
-   */
-  await updateBotStatus();
+    console.log(
+      `Bot: ${client.user.tag}`
+    );
 
-  startStatusScheduler();
-  startTicketScheduler();
-  startFixtureScheduler();
-});
+    console.log(
+      `Sunucu: ${client.guilds.cache.size}`
+    );
+
+    console.log(
+      `Ping: ${client.ws.ping}ms`
+    );
+
+    console.log(
+      "================================"
+    );
+
+    try {
+      client.user.setPresence({
+        activities: [
+          {
+            name:
+              "Axera League | Futbol RP",
+            type: 0
+          }
+        ],
+        status:
+          "online"
+      });
+    } catch {}
+
+    /*
+     * Açılışta eski durum mesajlarını temizle
+     * ve yeni mesaj gönder.
+     */
+    await updateBotStatus();
+
+    startStatusScheduler();
+    startFixtureScheduler();
+    startTicketScheduler();
+  }
+);
 
 /* =========================================================
    HATA YÖNETİMİ
@@ -3582,21 +4696,25 @@ process.on(
 
 if (!process.env.TOKEN) {
   console.error(
-    "❌ TOKEN bulunamadı! Railway Variables kısmına TOKEN ekleyin."
+    "❌ TOKEN bulunamadı!"
   );
 
   process.exit(1);
 }
 
-client.login(process.env.TOKEN)
-  .then(() => {
-    console.log("Discord giriş işlemi başlatıldı.");
-  })
-  .catch(error => {
-    console.error(
-      "Discord login hatası:",
-      error
-    );
+client.login(
+  process.env.TOKEN
+)
+.then(() => {
+  console.log(
+    "Discord bağlantısı başlatıldı."
+  );
+})
+.catch(error => {
+  console.error(
+    "DISCORD LOGIN HATASI:",
+    error
+  );
 
-    process.exit(1);
-  });
+  process.exit(1);
+});
